@@ -46,10 +46,10 @@ Last updated: 2026-02-06T13:57:30Z
 - select * from amazon_return_near_miss order by received_at desc;
 
 ## Recent checks
-- Amazon emails last 14 days: 12 emails, newest 2026-01-29.
-- Latest Gmail email in DB: 2026-02-06 01:26:51.
+- Amazon replay dry-run (2026-02-06): scanned 11, parsed 11 (last 14 days).
+- Latest Azure job poll (2026-02-06T13:56Z): 25 new, 25 existing, errors 0.
 - events_outbox amazon events: 12 rows (after replay).
-- Amazon replay (dry-run) parsed 12/12 emails including drop-off confirmations.
+- Amazon replay covers return request + drop-off confirmation templates.
 
 ## Amazon return parsing
 - Parser file: src/automation/amazonReturnParser.ts
