@@ -6,3 +6,6 @@ dist
 secrets
 tmp
 .codex_*
+.admin_token
+*.pid
+*.log
