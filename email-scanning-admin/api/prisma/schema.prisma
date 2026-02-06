@@ -1,0 +1,57 @@
+// Prisma schema for the Email Scanning Admin API.
+//
+// This is intentionally minimal: only the configuration tables the admin hub touches.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+enum MonitorScope {
+  all
+  selected
+
+  @@map("monitor_scope")
+}
+
+model MailAccount {
+  id                      Int      @id @default(autoincrement())
+  provider                String   @db.VarChar(50)
+  accountLabel            String   @map("account_label") @db.VarChar(100)
+  mailboxAddress          String   @map("mailbox_address") @db.VarChar(320)
+  authType                String   @map("auth_type") @db.VarChar(50)
+  encryptedCredentialsRef String   @map("encrypted_credentials_ref") @db.Text
+  enabled                 Boolean  @default(true)
+  createdAt               DateTime @map("created_at") @db.Timestamp(6)
+
+  @@map("mail_accounts")
+}
+
+model Monitor {
+  id                  String        @id @db.Text
+  name                String        @db.VarChar(200)
+  enabled             Boolean       @default(true)
+  provider            String        @db.VarChar(50)
+  senderRules         Json?         @map("sender_rules")
+  fromContains        String?       @map("from_contains") @db.Text
+  subjectContains     String?       @map("subject_contains") @db.Text
+  subjectRegex        String?       @map("subject_regex") @db.Text
+  bodyRegex           String?       @map("body_regex") @db.Text
+  hasAttachments      Boolean?      @map("has_attachments")
+  gmailLabel          String?       @map("gmail_label") @db.Text
+  scope               MonitorScope  @default(all)
+  mailAccountIds      Json?         @map("mail_account_ids")
+  aiPromptTemplate    String?       @map("ai_prompt_template") @db.Text
+  confidenceThreshold Decimal?      @map("confidence_threshold") @db.Decimal(4, 3)
+  allowedEventTypes   Json?         @map("allowed_event_types")
+  createdAt           DateTime      @map("created_at") @db.Timestamp(6)
+  updatedAt           DateTime      @map("updated_at") @db.Timestamp(6)
+
+  @@map("monitors")
+}
+

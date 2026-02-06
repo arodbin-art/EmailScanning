@@ -1,0 +1,13 @@
+
+> email-scanning-admin-ui@0.1.0 dev
+> vite --host 0.0.0.0
+
+
+  VITE v5.4.21  ready in 178 ms
+
+  ➜  Local:   http://localhost:5175/
+  ➜  Network: http://192.168.2.100:5175/
+  ➜  Network: http://10.14.0.2:5175/
+  ➜  Network: http://10.8.0.1:5175/
+  ➜  Network: http://172.17.0.1:5175/
+  ➜  Network: http://172.19.0.1:5175/

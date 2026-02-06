@@ -1,0 +1,204 @@
+// Prisma schema for Signal Engine (email ingestion)
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
+}
+
+enum EmailMonitorStatusState {
+  ignored
+  processed
+  errored
+
+  @@map("email_monitor_status_state")
+}
+
+enum EventsOutboxStatus {
+  pending
+  delivered
+  rejected
+
+  @@map("events_outbox_status")
+}
+
+model MailAccount {
+  id                       Int        @id @default(autoincrement())
+  provider                 String     @db.VarChar(50)
+  accountLabel             String     @map("account_label") @db.VarChar(100)
+  mailboxAddress           String     @map("mailbox_address") @db.VarChar(320)
+  authType                 String     @map("auth_type") @db.VarChar(50)
+  encryptedCredentialsRef  String     @map("encrypted_credentials_ref") @db.Text
+  enabled                  Boolean    @default(true)
+  createdAt                DateTime   @map("created_at") @db.Timestamp(6)
+  emails                   EmailRaw[]
+
+  @@map("mail_accounts")
+}
+
+model EmailRaw {
+  id                  Int                  @id @default(autoincrement())
+  mailAccountId       Int                  @map("mail_account_id")
+  provider            String               @db.VarChar(50)
+  messageId           String               @map("message_id") @db.Text
+  threadId            String?              @map("thread_id") @db.Text
+  fromAddress         String               @map("from_address") @db.Text
+  subject             String?              @db.Text
+  receivedAt          DateTime             @map("received_at") @db.Timestamp(6)
+  bodyHash            String               @map("body_hash") @db.Char(64)
+  bodyObjectKey       String               @map("body_object_key") @db.Text
+  attachmentMetadata  Json?                @map("attachment_metadata")
+  firstSeenAt         DateTime             @map("first_seen_at") @db.Timestamp(6)
+  lastSeenAt          DateTime             @map("last_seen_at") @db.Timestamp(6)
+  mailAccount         MailAccount          @relation(fields: [mailAccountId], references: [id])
+  monitorStatuses     EmailMonitorStatus[]
+  aiInferenceRuns     AiInferenceRun[]
+  eventsOutbox        EventsOutbox[]
+  monitorMatches      MonitorMatch[]
+  amazonRefundProcessed AmazonRefundProcessed[]
+  amazonRefundDiscrepancies AmazonRefundDiscrepancy[]
+  amazonReturnNearMiss AmazonReturnNearMiss?
+
+  @@unique([mailAccountId, messageId])
+  @@map("emails_raw")
+}
+
+model EmailMonitorStatus {
+  emailId     Int                     @map("email_id")
+  monitorId   String                  @map("monitor_id") @db.Text
+  status      EmailMonitorStatusState
+  evaluatedAt DateTime                @map("evaluated_at") @db.Timestamp(6)
+  email       EmailRaw                @relation(fields: [emailId], references: [id])
+
+  @@id([emailId, monitorId])
+  @@map("email_monitor_status")
+}
+
+model AiInferenceRun {
+  id            Int       @id @default(autoincrement())
+  emailId       Int       @map("email_id")
+  monitorId     String    @map("monitor_id") @db.Text
+  modelName     String    @map("model_name") @db.VarChar(100)
+  promptVersion String    @map("prompt_version") @db.VarChar(50)
+  outputJson    Json      @map("output_json")
+  confidence    Decimal   @db.Decimal(4, 3)
+  createdAt     DateTime  @map("created_at") @db.Timestamp(6)
+  email         EmailRaw  @relation(fields: [emailId], references: [id])
+
+  @@map("ai_inference_runs")
+}
+
+model EventsOutbox {
+  id            Int               @id @default(autoincrement())
+  dedupeKey     String            @unique @map("dedupe_key") @db.Char(32)
+  eventType     String            @map("event_type") @db.VarChar(100)
+  payloadJson   Json              @map("payload_json")
+  sourceEmailId Int               @map("source_email_id")
+  confidence    Decimal           @db.Decimal(4, 3)
+  status        EventsOutboxStatus
+  createdAt     DateTime          @map("created_at") @db.Timestamp(6)
+  sourceEmail   EmailRaw          @relation(fields: [sourceEmailId], references: [id])
+  deliveryLogs  EventsDeliveryLog[]
+
+  @@map("events_outbox")
+}
+
+model EventsDeliveryLog {
+  eventId     Int       @map("event_id")
+  rviResponse Json      @map("rvi_response")
+  deliveredAt DateTime  @map("delivered_at") @db.Timestamp(6)
+  event       EventsOutbox @relation(fields: [eventId], references: [id])
+
+  @@id([eventId, deliveredAt])
+  @@map("events_delivery_log")
+}
+
+enum MonitorScope {
+  all
+  selected
+
+  @@map("monitor_scope")
+}
+
+model Monitor {
+  id                  String   @id @db.Text
+  name                String   @db.VarChar(200)
+  enabled             Boolean  @default(true)
+  provider            String   @db.VarChar(50)
+  senderRules         Json?    @map("sender_rules")
+  fromContains        String?  @map("from_contains") @db.Text
+  subjectContains     String?  @map("subject_contains") @db.Text
+  subjectRegex        String?  @map("subject_regex") @db.Text
+  bodyRegex           String?  @map("body_regex") @db.Text
+  hasAttachments      Boolean? @map("has_attachments")
+  gmailLabel          String?  @map("gmail_label") @db.Text
+  scope               MonitorScope @default(all)
+  mailAccountIds      Json?    @map("mail_account_ids")
+  aiPromptTemplate    String?  @map("ai_prompt_template") @db.Text
+  confidenceThreshold Decimal? @map("confidence_threshold") @db.Decimal(4, 3)
+  allowedEventTypes   Json?    @map("allowed_event_types")
+  createdAt           DateTime @map("created_at") @db.Timestamp(6)
+  updatedAt           DateTime @map("updated_at") @db.Timestamp(6)
+  monitorMatches      MonitorMatch[]
+
+  @@map("monitors")
+}
+
+model MonitorMatch {
+  emailId       Int       @map("email_id")
+  monitorId     String    @map("monitor_id") @db.Text
+  matchedAt     DateTime  @map("matched_at") @db.Timestamp(6)
+  matchedFields Json      @map("matched_fields")
+  email         EmailRaw  @relation(fields: [emailId], references: [id])
+  monitor       Monitor   @relation(fields: [monitorId], references: [id])
+
+  @@id([emailId, monitorId])
+  @@map("monitor_matches")
+}
+
+model AmazonRefundProcessed {
+  orderId     String   @id @map("order_id") @db.Text
+  emailId     Int?     @map("email_id")
+  processedAt DateTime @map("processed_at") @db.Timestamp(6)
+  email       EmailRaw? @relation(fields: [emailId], references: [id])
+
+  @@map("amazon_refund_processed")
+}
+
+model AmazonRefundDiscrepancy {
+  id            Int      @id @default(autoincrement())
+  orderId       String   @unique @map("order_id") @db.Text
+  emailId       Int      @map("email_id")
+  chargedAmount Decimal  @map("charged_amount") @db.Decimal(10, 2)
+  refundedAmount Decimal @map("refunded_amount") @db.Decimal(10, 2)
+  difference    Decimal  @map("difference") @db.Decimal(10, 2)
+  subject       String?  @db.Text
+  receivedAt    DateTime @map("received_at") @db.Timestamp(6)
+  gmailLink     String?  @map("gmail_link") @db.Text
+  createdAt     DateTime @map("created_at") @db.Timestamp(6)
+  email         EmailRaw @relation(fields: [emailId], references: [id])
+
+  @@map("amazon_refund_discrepancies")
+}
+
+model AmazonReturnNearMiss {
+  emailId          Int      @id @map("email_id")
+  provider         String   @db.VarChar(50)
+  fromAddress      String   @map("from_address") @db.Text
+  subject          String?  @db.Text
+  receivedAt       DateTime @map("received_at") @db.Timestamp(6)
+  orderId          String?  @map("order_id") @db.Text
+  expectedEventType String? @map("expected_event_type") @db.VarChar(100)
+  missingFields    Json?    @map("missing_fields")
+  reason           String   @db.VarChar(100)
+  snippet          String?  @db.Text
+  aiSuggestion     Json?    @map("ai_suggestion")
+  createdAt        DateTime @map("created_at") @db.Timestamp(6)
+  email            EmailRaw @relation(fields: [emailId], references: [id])
+
+  @@map("amazon_return_near_miss")
+}

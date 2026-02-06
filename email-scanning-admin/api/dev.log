@@ -1,0 +1,5 @@
+
+> email-scanning-admin-api@0.1.0 start
+> node dist/index.js
+
+Email Scanning Admin API listening on 4000

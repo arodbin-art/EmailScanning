@@ -1,0 +1,33 @@
+{
+  "name": "signal-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "poll": "node --no-warnings ./dist/ingestion/index.js",
+    "retention:check": "node --no-warnings ./dist/maintenance/retentionCheck.js",
+    "deliver": "node --no-warnings ./dist/delivery/index.js",
+    "replay:amazon": "node --no-warnings ./dist/automation/amazonReturnReplay.js",
+    "test:amazon:return-parser": "tsc -p tsconfig.json && node --no-warnings dist/automation/amazonReturnParserTest.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.749.0",
+    "@azure/storage-blob": "^12.17.0",
+    "@prisma/client": "^5.22.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^140.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prisma": "^5.22.0",
+    "typescript": "^5.5.4"
+  }
+}

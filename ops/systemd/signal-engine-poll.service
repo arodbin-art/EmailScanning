@@ -1,0 +1,13 @@
+[Unit]
+Description=Signal Engine Poll
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/media/nas/workspaces/EmailScanning
+EnvironmentFile=/media/nas/workspaces/EmailScanning/.env
+ExecStart=/usr/bin/npm run poll
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
