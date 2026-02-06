@@ -393,3 +393,6 @@ Progress: 2026-02-06T05:29:44Z
 - Created Azure resources: rg-email-scanning-dev, email-scan-dev-env, Container Apps Job signal-engine-dev (manual).
 - Manual job run succeeded; poll summary logged and new emails ingested.
 - Added docs/azure-deploy.md and updated README.
+
+Progress: 2026-02-06T05:30:30Z
+- Bumped package version to 1.0.0 and tagged git release v1.0.0.
