@@ -379,3 +379,7 @@ Progress: 2026-02-06T04:46:38Z
 Progress: 2026-02-06T04:49:32Z
 - Added Amazon near-miss logging + Azure OpenAI fallback, documented in operations.
 - Ran amazon parser tests and rebuilt dist.
+
+Progress: 2026-02-06T04:50:55Z
+- Tests: npm run test:amazon:return-parser (pass), npm run build (pass).
+- Git commits created for near-miss/AI fallback and ignore patterns.
