@@ -25,6 +25,8 @@ Objective (Added): Detect Amazon refund discrepancies with deterministic parsing
 - [x] 14. Deterministic find-only monitor matching and persistence (Added during execution)
 - [x] 15. Amazon refund discrepancy detection (Added during execution)
 - [x] 16. Email Scanning Admin Hub (web UI for rules) (Added during execution)
+- [x] 17. Amazon return parsing enhancements + near-miss logging (Added during execution)
+- [x] 18. Azure dev deployment + scheduling (Added during execution)
 
 ## Task 1 — Completed
 Completed: 2026-01-30T03:18:48Z
@@ -396,3 +398,10 @@ Progress: 2026-02-06T05:29:44Z
 
 Progress: 2026-02-06T05:30:30Z
 - Bumped package version to 1.0.0 and tagged git release v1.0.0.
+
+Progress: 2026-02-06T13:56:52Z
+- Created Azure Automation account email-scan-automation and enabled managed identity.
+- Assigned Contributor role on rg-email-scanning-dev to the automation identity.
+- Created runbook trigger-signal-engine-job (PowerShell) to start Container Apps Job via REST.
+- Created schedule signal-engine-hourly and linked runbook via job schedule.
+- Manual runbook start succeeded; Container Apps Job execution signal-engine-dev-bv0jdc5 completed with 25 new emails.

@@ -1,6 +1,6 @@
 # Azure Deployment (Dev)
 
-This project deploys as a Container Apps Job (manual trigger). The job runs the ingestion poll once per execution.
+This project deploys as a Container Apps Job. The job runs the ingestion poll once per execution.
 
 ## Resources (dev)
 
@@ -46,6 +46,39 @@ The job uses manual trigger and relies on environment variables (secrets stored 
 az containerapp job start -g rg-email-scanning-dev -n signal-engine-dev
 ```
 
+## Automation Schedule
+
+Automation is enabled via Azure Automation (managed identity) to trigger the Container Apps Job on a schedule.
+
+- Automation account: `email-scan-automation`
+- Runbook: `trigger-signal-engine-job` (PowerShell)
+- Schedule: `signal-engine-hourly` (hourly, UTC)
+
+Runbook logic:
+- Connects with managed identity.
+- Calls `Microsoft.App/jobs/start` using API version `2026-01-01`.
+- Parameters: `SubscriptionId`, `ResourceGroup`, `JobName`.
+
+Manual runbook start:
+
+```
+az automation runbook start \
+  --resource-group rg-email-scanning-dev \
+  --automation-account-name email-scan-automation \
+  --name trigger-signal-engine-job \
+  --parameters SubscriptionId=<sub-id> ResourceGroup=rg-email-scanning-dev JobName=signal-engine-dev
+```
+
+Scheduling uses an Automation job schedule linked to the runbook. Adjust or disable with:
+
+```
+az automation schedule update \
+  --resource-group rg-email-scanning-dev \
+  --automation-account-name email-scan-automation \
+  --name signal-engine-hourly \
+  --is-enabled false
+```
+
 ## Logs
 
 ```
@@ -56,4 +89,4 @@ az containerapp job logs show -g rg-email-scanning-dev -n signal-engine-dev --ex
 ## Notes
 
 - The container entrypoint writes `GMAIL_TOKEN_STORE_B64` to `GMAIL_TOKEN_STORE_PATH` at startup.
-- Scheduling is not enabled yet; use manual runs until a schedule is approved.
+- The automation account managed identity has `Contributor` on `rg-email-scanning-dev`.
