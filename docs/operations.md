@@ -55,6 +55,11 @@ Optional:
 - `GMAIL_LABEL_IDS=INBOX,UNREAD`
 - `GMAIL_QUERY=is:unread`
 
+## Container deployment note (Gmail tokens)
+For containerized deployments, you can supply the Gmail token store file via:
+- `GMAIL_TOKEN_STORE_B64` (base64 encoded `gmail_tokens.json`)
+- `GMAIL_TOKEN_STORE_PATH` (default `secrets/gmail_tokens.json`)
+
 ## Find-only validation query
 ```
 select

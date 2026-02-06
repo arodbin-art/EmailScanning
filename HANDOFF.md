@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-06T04:53:13Z
+Last updated: 2026-02-06T05:29:44Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -10,6 +10,7 @@ Last updated: 2026-02-06T04:53:13Z
 - Parser now handles item titles from subjects/links, drop-off dates without year, and drop-off confirmation emails.
 - Amazon replay emitted 12 events to events_outbox.
 - Near-miss logging added for failed Amazon parsing (amazon_return_near_miss), with optional Azure OpenAI suggestions.
+- Azure dev deployment created as a Container Apps Job (manual trigger) in rg-email-scanning-dev.
 - Amazon return replay tool available for dry-run or emission from stored emails.
 
 ## Running services on NAS
@@ -18,6 +19,14 @@ Last updated: 2026-02-06T04:53:13Z
 - Admin API process pid: 3998537
 - Admin UI process pid: 3999213
 - Admin token file: /media/nas/workspaces/EmailScanning/email-scanning-admin/.admin_token
+
+## Azure dev deployment
+- Resource group: rg-email-scanning-dev
+- Container Apps environment: email-scan-dev-env
+- ACR: emailscanacr354705
+- Job: signal-engine-dev (manual trigger)
+- Image: emailscanacr354705.azurecr.io/signal-engine:dev
+- Last manual run: 2026-02-06T05:29:13Z (poll summary logged, 16 new emails)
 
 ## Key commands
 - Ingestion poll: node dist/ingestion/index.js --provider gmail --limit 20

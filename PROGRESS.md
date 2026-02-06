@@ -386,3 +386,10 @@ Progress: 2026-02-06T04:50:55Z
 
 Progress: 2026-02-06T04:53:13Z
 - Azure CLI is available; subscription is logged in. No deployment executed yet due to missing target + secrets strategy.
+
+Progress: 2026-02-06T05:29:44Z
+- Added Dockerfile + entrypoint for container deployments and .dockerignore.
+- Built and pushed signal-engine:dev image to emailscanacr354705.
+- Created Azure resources: rg-email-scanning-dev, email-scan-dev-env, Container Apps Job signal-engine-dev (manual).
+- Manual job run succeeded; poll summary logged and new emails ingested.
+- Added docs/azure-deploy.md and updated README.

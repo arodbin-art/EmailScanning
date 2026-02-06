@@ -1,0 +1,13 @@
+node_modules
+dist
+secrets
+tmp
+.env
+.env.local
+.prisma
+.git
+email-scanning-admin/node_modules
+email-scanning-admin/ui/node_modules
+email-scanning-admin/api/node_modules
+email-scanning-admin/ui/dist
+email-scanning-admin/api/dist
