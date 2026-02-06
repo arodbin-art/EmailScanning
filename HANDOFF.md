@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-06T04:50:55Z
+Last updated: 2026-02-06T04:53:13Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -56,6 +56,7 @@ Last updated: 2026-02-06T04:50:55Z
 - PATCH /return-flows/:id/refund
 - Update amazon parser to handle subject lines like Your refund for if needed.
 - Run the Amazon replay tool with --emit to backfill events if needed.
+- Decide on Azure deployment target (Container App/App Service) and secret strategy for Gmail token storage if deploying signal-engine.
 
 ## Notes
 - Database schema is email_scanning in the signal_engine database.
