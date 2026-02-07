@@ -8,6 +8,7 @@ This project deploys as a Container Apps Job. The job runs the ingestion poll on
 - Container Apps environment: `email-scan-dev-env`
 - ACR: `emailscanacr354705` (Canada Central)
 - Job: `signal-engine-dev`
+- Delivery job: `signal-engine-deliver-dev`
 
 ## Build + Push
 
@@ -44,6 +45,7 @@ The job uses manual trigger and relies on environment variables (secrets stored 
 
 ```
 az containerapp job start -g rg-email-scanning-dev -n signal-engine-dev
+az containerapp job start -g rg-email-scanning-dev -n signal-engine-deliver-dev
 ```
 
 ## Automation Schedule
@@ -56,7 +58,7 @@ Automation is enabled via Azure Automation (managed identity) to trigger the Con
 
 Runbook logic:
 - Connects with managed identity.
-- Calls `Microsoft.App/jobs/start` using API version `2026-01-01`.
+- Calls `Microsoft.App/jobs/start` using API version `2026-01-01` for both ingestion and delivery jobs.
 - Parameters: `SubscriptionId`, `ResourceGroup`, `JobName`.
 
 Manual runbook start:

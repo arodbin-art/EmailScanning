@@ -418,3 +418,8 @@ Progress: 2026-02-07T05:25:00Z
 - Auto-links only when exactly 1 candidate is returned; otherwise marks event `needs_review`.
 - For drop-off confirmation: marks return flow submitted.
 - For refund issued: marks return flow refunded with `refunded_at` from email received timestamp.
+
+Progress: 2026-02-07T06:40:00Z
+- Added Azure dev delivery job `signal-engine-deliver-dev` (manual trigger) and updated Azure Automation runbook to start both ingestion and delivery jobs every 30 minutes.
+- Fixed delivery worker so auth/outage/404 errors do not burn events (keeps them pending for retry).
+- Redeployed MoneyRecovery dev container app image so `/rvi/external-references/lookup` and `/rvi/returns/candidates` endpoints are present (they return 401 without a token).

@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-07T05:25:00Z
+Last updated: 2026-02-07T06:40:00Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -12,7 +12,8 @@ Last updated: 2026-02-07T05:25:00Z
 - Near-miss logging added for failed Amazon parsing (amazon_return_near_miss), with optional Azure OpenAI suggestions.
 - Amazon near-miss AI suggestions enabled in Azure dev job (AMAZON_AI_ENABLED=true).
 - Azure dev deployment created as a Container Apps Job (manual trigger) in rg-email-scanning-dev.
-- Azure Automation schedule now triggers the job hourly via runbook (managed identity).
+- Azure Automation schedule now triggers the ingestion job and a delivery job every 30 minutes via runbook (managed identity).
+- Delivery job is configured but requires a MoneyRecovery bearer token; without it, events remain pending (do not get burned).
 - Amazon return replay tool available for dry-run or emission from stored emails.
 
 ## Running services on NAS
@@ -35,7 +36,16 @@ Last updated: 2026-02-07T05:25:00Z
 - Automation account: email-scan-automation
 - Runbook: trigger-signal-engine-job
 - Schedule: signal-engine-30min (every 30 minutes, UTC)
-- Runbook parameters: SubscriptionId, ResourceGroup=rg-email-scanning-dev, JobName=signal-engine-dev
+- Runbook parameters: SubscriptionId, ResourceGroup=rg-email-scanning-dev, IngestionJobName=signal-engine-dev, DeliveryJobName=signal-engine-deliver-dev
+
+## Azure delivery job
+- Job: signal-engine-deliver-dev (manual trigger)
+- Runs: node dist/delivery/index.js
+- Requires:
+- DATABASE_URL (same as ingestion)
+- RVI_BASE_URL (MoneyRecovery API base)
+- RVI_BEARER_TOKEN (MoneyRecovery JWT, currently obtained via UI localStorage authToken)
+- RVI_DELIVERY_KIND=money_recovery
 
 ## Key commands
 - Ingestion poll: node dist/ingestion/index.js --provider gmail --limit 20
