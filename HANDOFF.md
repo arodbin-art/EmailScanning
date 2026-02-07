@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-07T05:07:00Z
+Last updated: 2026-02-07T05:25:00Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -59,22 +59,21 @@ Last updated: 2026-02-07T05:07:00Z
 - Payload includes order_id, item_title, amount or refund_amount, drop_off_by, and email metadata
 
 ## RVI integration plan
-- Signal engine currently only emits events_outbox rows.
-- Next step is to add a delivery handler in MoneyRecovery or map events to new endpoints.
-- Proposed mapping:
-- amazon.return_requested: create or update RVI with external reference order_id and set return flow submitted.
-- amazon.refund_issued: mark return flow refunded and update external reference if missing.
+- Signal engine emits Amazon events to `events_outbox`.
+- Delivery worker can translate Amazon events into MoneyRecovery API calls when configured:
+- Lookup `amazon_order_id` external reference (source `signal-engine`).
+- If missing, try `/rvi/returns/candidates?merchant=Amazon&amount_total=...` and only auto-link if there is exactly one candidate.
+- For `amazon.return_dropped_off`, marks return flow submitted.
+- For `amazon.refund_issued`, marks return flow refunded (uses email received timestamp as `refunded_at`).
+- It does not auto-create RVIs because MoneyRecovery `POST /rvi` requires `person_code`, which is not derivable from emails safely.
 
 ## Next steps
-- Decide on event delivery target for MoneyRecovery. There is no /events endpoint yet.
-- Add a delivery worker or webhook target that calls MoneyRecovery endpoints:
-- GET /rvi/external-references/lookup
-- PATCH /rvi/:id/external-references
-- GET /rvi/returns/candidates
-- PATCH /return-flows/:id/refund
-- Update amazon parser to handle subject lines like Your refund for if needed.
-- Run the Amazon replay tool with --emit to backfill events if needed.
-- Decide on Azure deployment target (Container App/App Service) and secret strategy for Gmail token storage if deploying signal-engine.
+- Configure delivery env vars and run the worker:
+- `RVI_BASE_URL` (MoneyRecovery API base URL)
+- `RVI_BEARER_TOKEN` (JWT)
+- `RVI_DELIVERY_KIND=money_recovery`
+- Command: `npm run deliver`
+- If desired, add a second Azure Container Apps Job for delivery (or extend the ingestion job entrypoint to run delivery after poll).
 
 ## Notes
 - Database schema is email_scanning in the signal_engine database.

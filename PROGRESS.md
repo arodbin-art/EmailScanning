@@ -409,3 +409,12 @@ Progress: 2026-02-06T13:56:52Z
 Progress: 2026-02-07T05:05:00Z
 - Enabled Amazon AI fallback in the dev Container Apps Job (Azure OpenAI endpoint + key).
 - Replaced hourly Automation schedule with signal-engine-30min (every 30 minutes, UTC) and re-linked job schedule.
+
+Progress: 2026-02-07T05:25:00Z
+- Added MoneyRecovery delivery mode for Amazon events (no generic /events endpoint dependency).
+- Delivery worker now passes `eventType` explicitly to delivery clients.
+- MoneyRecovery delivery behavior:
+- Lookup external reference for `amazon_order_id` (source `signal-engine`), else try candidates by amount.
+- Auto-links only when exactly 1 candidate is returned; otherwise marks event `needs_review`.
+- For drop-off confirmation: marks return flow submitted.
+- For refund issued: marks return flow refunded with `refunded_at` from email received timestamp.
