@@ -52,7 +52,7 @@ Automation is enabled via Azure Automation (managed identity) to trigger the Con
 
 - Automation account: `email-scan-automation`
 - Runbook: `trigger-signal-engine-job` (PowerShell)
-- Schedule: `signal-engine-hourly` (hourly, UTC)
+- Schedule: `signal-engine-30min` (every 30 minutes, UTC)
 
 Runbook logic:
 - Connects with managed identity.
@@ -75,7 +75,7 @@ Scheduling uses an Automation job schedule linked to the runbook. Adjust or disa
 az automation schedule update \
   --resource-group rg-email-scanning-dev \
   --automation-account-name email-scan-automation \
-  --name signal-engine-hourly \
+  --name signal-engine-30min \
   --is-enabled false
 ```
 

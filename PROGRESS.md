@@ -405,3 +405,7 @@ Progress: 2026-02-06T13:56:52Z
 - Created runbook trigger-signal-engine-job (PowerShell) to start Container Apps Job via REST.
 - Created schedule signal-engine-hourly and linked runbook via job schedule.
 - Manual runbook start succeeded; Container Apps Job execution signal-engine-dev-bv0jdc5 completed with 25 new emails.
+
+Progress: 2026-02-07T05:05:00Z
+- Enabled Amazon AI fallback in the dev Container Apps Job (Azure OpenAI endpoint + key).
+- Replaced hourly Automation schedule with signal-engine-30min (every 30 minutes, UTC) and re-linked job schedule.
