@@ -1,9 +1,6 @@
-export type RviResponse = {
-  status: "accepted" | "rejected" | "needs_review"
-  raw: unknown
-}
+import { DeliveryClient, DeliveryResult, OutboxDeliveryInput } from "./types.js"
 
-export class RviClient {
+export class RviClient implements DeliveryClient {
   private readonly baseUrl: string
   private readonly bearerToken?: string
   private readonly timeoutMs: number
@@ -14,7 +11,13 @@ export class RviClient {
     this.timeoutMs = params.timeoutMs ?? 10000
   }
 
-  async deliverEvent(payload: Record<string, unknown>): Promise<RviResponse> {
+  async deliverOutboxEvent(input: OutboxDeliveryInput): Promise<DeliveryResult> {
+    // Back-compat with earlier payloads that didn't embed the event type.
+    const enriched = { event_type: input.eventType, ...input.payload }
+    return this.deliverEvent(enriched)
+  }
+
+  async deliverEvent(payload: Record<string, unknown>): Promise<DeliveryResult> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
     try {

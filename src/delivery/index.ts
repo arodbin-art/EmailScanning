@@ -1,6 +1,7 @@
 import "dotenv/config"
 import { prisma } from "../db/prisma.js"
 import { DeliveryWorker } from "./deliveryWorker.js"
+import { MoneyRecoveryClient } from "./moneyRecoveryClient.js"
 import { RviClient } from "./rviClient.js"
 
 const baseUrl = process.env.RVI_BASE_URL
@@ -13,8 +14,13 @@ const bearerToken = process.env.RVI_BEARER_TOKEN
 const timeoutMs = process.env.RVI_TIMEOUT_MS ? Number(process.env.RVI_TIMEOUT_MS) : undefined
 const batchSize = process.env.RVI_BATCH_SIZE ? Number(process.env.RVI_BATCH_SIZE) : undefined
 
-const rvi = new RviClient({ baseUrl, bearerToken, timeoutMs })
-const worker = new DeliveryWorker({ db: prisma, rvi, batchSize })
+const kind = (process.env.RVI_DELIVERY_KIND ?? "generic").toLowerCase()
+const client =
+  kind === "money_recovery"
+    ? new MoneyRecoveryClient({ baseUrl, bearerToken, timeoutMs })
+    : new RviClient({ baseUrl, bearerToken, timeoutMs })
+
+const worker = new DeliveryWorker({ db: prisma, client, batchSize })
 
 worker
   .deliverPending()

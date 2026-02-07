@@ -1,14 +1,14 @@
 import { PrismaClient } from "@prisma/client"
-import { RviClient } from "./rviClient.js"
+import { DeliveryClient } from "./types.js"
 
 export class DeliveryWorker {
   private readonly db: PrismaClient
-  private readonly rvi: RviClient
+  private readonly client: DeliveryClient
   private readonly batchSize: number
 
-  constructor(params: { db: PrismaClient; rvi: RviClient; batchSize?: number }) {
+  constructor(params: { db: PrismaClient; client: DeliveryClient; batchSize?: number }) {
     this.db = params.db
-    this.rvi = params.rvi
+    this.client = params.client
     this.batchSize = params.batchSize ?? 25
   }
 
@@ -20,12 +20,12 @@ export class DeliveryWorker {
     })
 
     for (const event of pending) {
-      await this.deliverEvent(event.id, event.payloadJson as Record<string, unknown>)
+      await this.deliverEvent(event.id, event.eventType, event.payloadJson as Record<string, unknown>)
     }
   }
 
-  private async deliverEvent(eventId: number, payload: Record<string, unknown>): Promise<void> {
-    const response = await this.rvi.deliverEvent(payload)
+  private async deliverEvent(eventId: number, eventType: string, payload: Record<string, unknown>): Promise<void> {
+    const response = await this.client.deliverOutboxEvent({ eventType, payload })
 
     await this.db.eventsOutbox.update({
       where: { id: eventId },

@@ -20,6 +20,19 @@ Alert on log lines containing:
 ## AI optional gating
 Set `AI_ENABLED=true` to enable AI. When enabled, the OpenAI key is read from `secrets/OpenAI.key`.
 
+## MoneyRecovery (RVI) delivery
+This service writes detected signals to `events_outbox`. The delivery worker can translate Amazon events into MoneyRecovery API calls.
+
+Environment variables:
+- `RVI_BASE_URL` (example: `https://rvi-dev.proudmoss-21bb559c.canadacentral.azurecontainerapps.io`)
+- `RVI_BEARER_TOKEN` (MoneyRecovery JWT)
+- `RVI_DELIVERY_KIND=money_recovery`
+
+Run the worker:
+```
+npm run deliver
+```
+
 ## Amazon near-miss logging + AI fallback
 When an Amazon return/refund email fails deterministic parsing, the system records a near-miss row in `amazon_return_near_miss` for tuning.
 

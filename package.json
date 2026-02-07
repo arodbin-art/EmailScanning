@@ -1,6 +1,6 @@
 {
   "name": "signal-engine",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -16,7 +16,8 @@
     "retention:check": "node --no-warnings ./dist/maintenance/retentionCheck.js",
     "deliver": "node --no-warnings ./dist/delivery/index.js",
     "replay:amazon": "node --no-warnings ./dist/automation/amazonReturnReplay.js",
-    "test:amazon:return-parser": "tsc -p tsconfig.json && node --no-warnings dist/automation/amazonReturnParserTest.js"
+    "test:amazon:return-parser": "tsc -p tsconfig.json && node --no-warnings dist/automation/amazonReturnParserTest.js",
+    "test:delivery:money-recovery": "tsc -p tsconfig.json && node --no-warnings dist/delivery/moneyRecoveryClientTest.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.749.0",
