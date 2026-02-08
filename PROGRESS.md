@@ -423,3 +423,8 @@ Progress: 2026-02-07T06:40:00Z
 - Added Azure dev delivery job `signal-engine-deliver-dev` (manual trigger) and updated Azure Automation runbook to start both ingestion and delivery jobs every 30 minutes.
 - Fixed delivery worker so auth/outage/404 errors do not burn events (keeps them pending for retry).
 - Redeployed MoneyRecovery dev container app image so `/rvi/external-references/lookup` and `/rvi/returns/candidates` endpoints are present (they return 401 without a token).
+
+Progress: 2026-02-08T00:20:00Z
+- Deployed Email Scanning Admin Hub to Azure as a Container App: `email-scanning-admin-dev`.
+- Admin URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/dashboard
+- UI is served from the API container (`UI_DIST_PATH=/app/ui-dist`); UI reads the admin token from runtime localStorage key `email_scanning_admin_token` when not baked at build time.

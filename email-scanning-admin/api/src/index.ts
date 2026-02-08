@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import { randomUUID } from 'crypto';
+import path from 'path';
+import fs from 'fs';
 import { validateSchemaOrThrow } from './db.js';
 import { requireAdmin } from './auth.js';
 import {
@@ -23,6 +25,10 @@ import {
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+
+const uiDistPath = process.env.UI_DIST_PATH || path.join(process.cwd(), 'ui-dist');
+const uiIndexPath = path.join(uiDistPath, 'index.html');
+const hasUi = fs.existsSync(uiIndexPath);
 
 if (!process.env.ADMIN_TOKEN) {
   console.error('Startup failed: ADMIN_TOKEN is required.');
@@ -58,6 +64,11 @@ app.use((req, res, next) => {
 app.use('/api', requireAdmin);
 
 const aiEnabled = process.env.AI_ENABLED !== 'false';
+
+// When deployed as a single container, serve the React UI from the API process.
+if (hasUi) {
+  app.use(express.static(uiDistPath));
+}
 
 app.get('/api/mail-accounts', async (_req, res, next) => {
   try {
@@ -244,6 +255,17 @@ app.delete('/api/monitors/:id', async (req, res, next) => {
     next(err);
   }
 });
+
+// SPA fallback for non-API routes (admin pages).
+if (hasUi) {
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      next();
+      return;
+    }
+    res.sendFile(uiIndexPath);
+  });
+}
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err?.issues) {

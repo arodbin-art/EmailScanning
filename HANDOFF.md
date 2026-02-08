@@ -23,6 +23,12 @@ Last updated: 2026-02-07T06:40:00Z
 - Admin UI process pid: 3999213
 - Admin token file: /media/nas/workspaces/EmailScanning/email-scanning-admin/.admin_token
 
+## Azure dev admin app (control plane)
+- Container App: email-scanning-admin-dev
+- URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/dashboard
+- Notes:
+- API requires ADMIN_TOKEN; UI can read runtime token from localStorage key `email_scanning_admin_token`.
+
 ## Azure dev deployment
 - Resource group: rg-email-scanning-dev
 - Container Apps environment: email-scan-dev-env
