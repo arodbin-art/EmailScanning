@@ -28,3 +28,20 @@ export type Monitor = {
   created_at: string;
   updated_at: string;
 };
+
+export type EventStatus = 'pending' | 'delivered' | 'rejected';
+
+export type SignalEvent = {
+  id: number;
+  status: EventStatus;
+  event_type: string;
+  created_at: string;
+  confidence: number | null;
+  source_email_id: number;
+  payload_json: unknown;
+  email_subject: string | null;
+  email_from: string | null;
+  email_received_at: string | null;
+  delivered_at: string | null;
+  rvi_response: unknown | null;
+};

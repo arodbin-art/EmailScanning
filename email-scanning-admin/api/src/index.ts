@@ -20,8 +20,10 @@ import {
   createMonitor,
   updateMonitor,
   deleteMonitor,
-  getMailAccountProviders
+  getMailAccountProviders,
+  listEvents
 } from './store.js';
+import { EventsOutboxStatus } from './types.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -251,6 +253,26 @@ app.delete('/api/monitors/:id', async (req, res, next) => {
     const id = req.params.id;
     await deleteMonitor(id);
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/events', async (req, res, next) => {
+  try {
+    const statusRaw = typeof req.query.status === 'string' ? req.query.status : '';
+    const status = statusRaw.toLowerCase();
+    const allowedStatuses: EventsOutboxStatus[] = ['pending', 'delivered', 'rejected'];
+    const statusFilter = status ? (allowedStatuses.includes(status as EventsOutboxStatus) ? (status as EventsOutboxStatus) : null) : undefined;
+    if (statusFilter === null) {
+      res.status(400).json({ error: 'Invalid status. Use pending, delivered, or rejected.' });
+      return;
+    }
+
+    const limitRaw = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+    const limit = Number.isFinite(limitRaw) ? Math.trunc(limitRaw as number) : undefined;
+    const data = await listEvents({ status: statusFilter, limit });
+    res.json({ data });
   } catch (err) {
     next(err);
   }

@@ -33,3 +33,20 @@ export type ValidationWarning = {
   code: string;
   message: string;
 };
+
+export type EventsOutboxStatus = 'pending' | 'delivered' | 'rejected';
+
+export type EventRecord = {
+  id: number;
+  status: EventsOutboxStatus;
+  event_type: string;
+  created_at: string;
+  confidence: number | null;
+  source_email_id: number;
+  payload_json: unknown;
+  email_subject: string | null;
+  email_from: string | null;
+  email_received_at: string | null;
+  delivered_at: string | null;
+  rvi_response: unknown | null;
+};

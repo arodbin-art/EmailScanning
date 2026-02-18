@@ -11,6 +11,24 @@ sudo systemctl enable --now signal-engine-poll.timer
 
 Adjust interval by editing `ops/systemd/signal-engine-poll.timer`.
 
+## Azure Postgres firewall IP drift
+When your public IP changes, Azure Postgres firewall access can break. This repo includes an updater script:
+
+```
+ops/azure/update_pg_firewall_ip.sh
+```
+
+Default targets:
+- Resource group: `GiftTrackerRG`
+- Server: `gift-tracker-db-rod`
+- Rule: `allow-email-scanning-current`
+
+Cron (installed on NAS) runs every 10 minutes:
+
+```
+*/10 * * * * cd /media/nas/workspaces/EmailScanning && /media/nas/workspaces/EmailScanning/ops/azure/update_pg_firewall_ip.sh >> /media/nas/workspaces/EmailScanning/ops/logs/update_pg_firewall_ip.log 2>&1
+```
+
 ## Alerts
 Alert on log lines containing:
 - `Gmail auth error`

@@ -1,5 +1,6 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from './db.js';
-import { MailAccountRecord, MonitorRecord } from './types.js';
+import { EventRecord, EventsOutboxStatus, MailAccountRecord, MonitorRecord } from './types.js';
 
 function normalizeJson<T>(value: unknown): T | null {
   if (value === null || value === undefined) return null;
@@ -24,6 +25,18 @@ function toNumber(value: unknown): number | null {
   }
   const parsed = Number(value);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function parseJson(value: unknown): unknown | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
 }
 
 export async function listMailAccounts(): Promise<MailAccountRecord[]> {
@@ -334,4 +347,51 @@ export async function getMailAccountProviders(ids: number[]): Promise<string[]> 
     WHERE id = ANY(${ids}::int[])
   `) as { provider: string }[];
   return rows.map((row) => row.provider);
+}
+
+export async function listEvents(input: {
+  status?: EventsOutboxStatus;
+  limit?: number;
+}): Promise<EventRecord[]> {
+  const whereClause = input.status
+    ? Prisma.sql`WHERE eo.status = ${input.status}::email_scanning.events_outbox_status`
+    : Prisma.empty;
+  const limit = Math.max(1, Math.min(input.limit ?? 200, 1000));
+
+  const rows = (await prisma.$queryRaw(Prisma.sql`
+    SELECT
+      eo.id,
+      eo.status::text as status,
+      eo.event_type,
+      eo.created_at,
+      eo.confidence,
+      eo.source_email_id,
+      eo.payload_json,
+      er.subject as email_subject,
+      er.from_address as email_from,
+      er.received_at as email_received_at,
+      edl.delivered_at,
+      edl.rvi_response
+    FROM email_scanning.events_outbox eo
+    JOIN email_scanning.emails_raw er
+      ON er.id = eo.source_email_id
+    LEFT JOIN LATERAL (
+      SELECT delivered_at, rvi_response
+      FROM email_scanning.events_delivery_log
+      WHERE event_id = eo.id
+      ORDER BY delivered_at DESC
+      LIMIT 1
+    ) edl ON true
+    ${whereClause}
+    ORDER BY eo.created_at DESC
+    LIMIT ${limit}
+  `)) as EventRecord[];
+
+  return rows.map((row) => ({
+    ...row,
+    status: row.status as EventsOutboxStatus,
+    confidence: toNumber(row.confidence),
+    payload_json: parseJson(row.payload_json),
+    rvi_response: parseJson(row.rvi_response)
+  }));
 }

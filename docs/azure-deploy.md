@@ -107,6 +107,16 @@ docker tag $IMAGE:$TAG $ACR.azurecr.io/$IMAGE:$TAG
 docker push $ACR.azurecr.io/$IMAGE:$TAG
 ```
 
+Cloud build alternative (no local Docker daemon required):
+
+```
+AZURE_CONFIG_DIR=/tmp/azure az acr build \
+  -r emailscanacr354705 \
+  -t email-scanning-admin:dev \
+  -f email-scanning-admin/Dockerfile \
+  email-scanning-admin
+```
+
 Create the container app:
 
 ```
@@ -140,6 +150,21 @@ Get the URL:
 
 ```
 az containerapp show -g $RG -n email-scanning-admin-dev --query properties.configuration.ingress.fqdn -o tsv
+```
+
+Deploy an updated image revision:
+
+```
+AZURE_CONFIG_DIR=/tmp/azure az containerapp update \
+  -g rg-email-scanning-dev \
+  -n email-scanning-admin-dev \
+  --image emailscanacr354705.azurecr.io/email-scanning-admin:dev
+```
+
+Events page:
+
+```
+https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/events
 ```
 
 ## Notes

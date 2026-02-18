@@ -1,11 +1,12 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-07T06:40:00Z
+Last updated: 2026-02-18T23:40:00Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
 - Gmail ingestion works, GMAIL_QUERY is set to in:anywhere to include spam.
 - Admin web UI is running and can edit mail accounts and monitors.
+- Admin web UI now includes an Events page to review all outbox events, including rejected delivery responses.
 - Amazon return and refund parsing exists and emits amazon events to events_outbox.
 - Parser now handles item titles from subjects/links, drop-off dates without year, and drop-off confirmation emails.
 - Amazon replay emitted 12 events to events_outbox.
@@ -13,8 +14,10 @@ Last updated: 2026-02-07T06:40:00Z
 - Amazon near-miss AI suggestions enabled in Azure dev job (AMAZON_AI_ENABLED=true).
 - Azure dev deployment created as a Container Apps Job (manual trigger) in rg-email-scanning-dev.
 - Azure Automation schedule now triggers the ingestion job and a delivery job every 30 minutes via runbook (managed identity).
-- Delivery job is configured but requires a MoneyRecovery bearer token; without it, events remain pending (do not get burned).
+- Delivery job is configured with MoneyRecovery credentials in local `.env`; latest delivery run reached MoneyRecovery and rejected events with `no_candidate_rvi_found`.
 - Amazon return replay tool available for dry-run or emission from stored emails.
+- Azure Postgres firewall now has rule `allow-email-scanning-current` for current public IP.
+- Cron job installed to auto-refresh Azure Postgres firewall IP every 10 minutes.
 
 ## Running services on NAS
 - Admin UI dev server: http://nas:5175
@@ -28,6 +31,7 @@ Last updated: 2026-02-07T06:40:00Z
 - URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/dashboard
 - Notes:
 - API requires ADMIN_TOKEN; UI can read runtime token from localStorage key `email_scanning_admin_token`.
+- Events page URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/events
 
 ## Azure dev deployment
 - Resource group: rg-email-scanning-dev
@@ -67,6 +71,8 @@ Last updated: 2026-02-07T06:40:00Z
 - Latest Azure job poll (2026-02-06T13:56Z): 25 new, 25 existing, errors 0.
 - events_outbox amazon events: 12 rows (after replay).
 - Amazon replay covers return request + drop-off confirmation templates.
+- Delivery run (2026-02-18T22:59Z): DB connectivity restored; 8 events moved to `rejected` with reason `no_candidate_rvi_found`.
+- Admin app redeploy (2026-02-18T23:33Z): new UI bundle includes Events page and `/api/events` integration.
 
 ## Amazon return parsing
 - Parser file: src/automation/amazonReturnParser.ts
@@ -84,13 +90,13 @@ Last updated: 2026-02-07T06:40:00Z
 - It does not auto-create RVIs because MoneyRecovery `POST /rvi` requires `person_code`, which is not derivable from emails safely.
 
 ## Next steps
-- Configure delivery env vars and run the worker:
-- `RVI_BASE_URL` (MoneyRecovery API base URL)
-- `RVI_BEARER_TOKEN` (JWT)
-- `RVI_DELIVERY_KIND=money_recovery`
+- Add or sync MoneyRecovery external references for Amazon order IDs so candidate matching can resolve uniquely.
+- Re-run delivery after references/candidates are available:
 - Command: `npm run deliver`
-- If desired, add a second Azure Container Apps Job for delivery (or extend the ingestion job entrypoint to run delivery after poll).
+- Optional: add a dedicated admin table/page for unresolved candidate diagnostics.
 
 ## Notes
 - Database schema is email_scanning in the signal_engine database.
 - Admin UI uses VITE_API_BASE_URL to reach the API, and defaults to http://nas:4000.
+- Firewall sync script: `ops/azure/update_pg_firewall_ip.sh`
+- Cron line: `*/10 * * * * cd /media/nas/workspaces/EmailScanning && /media/nas/workspaces/EmailScanning/ops/azure/update_pg_firewall_ip.sh >> /media/nas/workspaces/EmailScanning/ops/logs/update_pg_firewall_ip.log 2>&1`

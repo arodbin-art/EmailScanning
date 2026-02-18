@@ -6,7 +6,7 @@ Standalone admin web application for configuring email scanning. This is a contr
 
 - Manage email accounts (configuration only).
 - Manage monitors and rules.
-- Visualize configuration state.
+- Review outbox events and delivery outcomes.
 
 ## Boundaries
 
@@ -37,6 +37,7 @@ Standalone admin web application for configuring email scanning. This is a contr
 - `POST /api/monitors`
 - `PUT /api/monitors/:id`
 - `DELETE /api/monitors/:id`
+- `GET /api/events?status=<pending|delivered|rejected>&limit=<n>`
 
 All routes require admin auth and only touch configuration tables.
 
@@ -94,6 +95,7 @@ Optional:
 
 Deployed as an Azure Container App in `rg-email-scanning-dev`:
 - URL: `https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/dashboard`
+- Events page: `https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/events`
 
 Auth model:
 - The API requires `ADMIN_TOKEN`.

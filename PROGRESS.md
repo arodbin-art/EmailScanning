@@ -428,3 +428,16 @@ Progress: 2026-02-08T00:20:00Z
 - Deployed Email Scanning Admin Hub to Azure as a Container App: `email-scanning-admin-dev`.
 - Admin URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/dashboard
 - UI is served from the API container (`UI_DIST_PATH=/app/ui-dist`); UI reads the admin token from runtime localStorage key `email_scanning_admin_token` when not baked at build time.
+
+Progress: 2026-02-18T23:20:00Z
+- Added read-only admin events visibility for all outbox statuses (pending/delivered/rejected).
+- API: new `GET /api/events` endpoint with status and limit filters, including latest delivery log response and source email metadata.
+- UI: new `/admin/events` page with status tabs and delivery response details for rejected-event review.
+
+Progress: 2026-02-18T23:33:00Z
+- Built and pushed updated `email-scanning-admin:dev` image (ACR build run `cx1`).
+- Updated Azure Container App `email-scanning-admin-dev` to latest image; live app now serves `/admin/events`.
+
+Progress: 2026-02-18T23:35:00Z
+- Added Azure Postgres firewall IP updater script `ops/azure/update_pg_firewall_ip.sh`.
+- Installed NAS cron job to refresh firewall rule `allow-email-scanning-current` every 10 minutes.
