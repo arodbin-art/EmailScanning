@@ -214,6 +214,7 @@ export class EmailIngestionService {
 
     await this.emitAmazonReturnEvent({
       emailId: createdEmail.id,
+      mailAccountId: account.id,
       provider: provider.provider,
       message,
       normalizedBody: normalized,
@@ -422,6 +423,7 @@ export class EmailIngestionService {
 
   private async emitAmazonReturnEvent(params: {
     emailId: number
+    mailAccountId: number
     provider: string
     message: ProviderMessage
     normalizedBody: string
@@ -459,6 +461,7 @@ export class EmailIngestionService {
       item_title: parsed.itemTitle,
       email: {
         email_id: params.emailId,
+        mail_account_id: params.mailAccountId,
         message_id: params.message.messageId,
         from: params.message.fromAddress,
         subject: params.message.subject,
@@ -467,8 +470,12 @@ export class EmailIngestionService {
     }
 
     if (parsed.eventType === "amazon.return_requested") {
-      payload.amount = parsed.amount
+      payload.amount_total = parsed.amountTotal
+      payload.amount = parsed.amountTotal
       payload.drop_off_by = parsed.dropOffBy
+      if (parsed.paymentMethodLast4) {
+        payload.payment_method_last4 = parsed.paymentMethodLast4
+      }
     } else if (parsed.eventType === "amazon.refund_issued") {
       payload.refund_amount = parsed.refundAmount
     } else if (parsed.eventType === "amazon.return_dropped_off") {

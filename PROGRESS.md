@@ -441,3 +441,24 @@ Progress: 2026-02-18T23:33:00Z
 Progress: 2026-02-18T23:35:00Z
 - Added Azure Postgres firewall IP updater script `ops/azure/update_pg_firewall_ip.sh`.
 - Installed NAS cron job to refresh firewall rule `allow-email-scanning-current` every 10 minutes.
+
+Progress: 2026-02-19T00:10:00Z
+- Added `mail_accounts.moneyrecovery_person_code` mapping and deployed migration `20260218234500_moneyrecovery_person_code_and_needs_review`.
+- Extended `events_outbox_status` enum with `needs_review` and updated delivery worker status mapping.
+- MoneyRecovery delivery now supports fallback auto-create:
+- lookup external reference -> candidates -> create RVI (if person code exists) -> ensure external reference -> apply event transitions.
+- Missing person code now yields `needs_review` with reason `missing_person_code_mapping_for_mail_account` (not rejected).
+- Added Amazon rejected-event backfill tool: `npm run deliver:backfill:amazon`.
+- Added admin support for person code configuration (API + UI), plus warning banners on mail accounts/monitors/events screens for missing mappings.
+- Added parser improvements for return-request amount_total, payment method last4 extraction, and year-boundary inference for missing-year dates.
+- Added tests for auto-create flow, replay idempotency, missing mapping behavior, refund-first flow, and Rodney sample parsing.
+- Validation:
+- `npm run db:generate` (pass)
+- `npm run db:migrate:deploy` (pass)
+- `npm run build` (pass)
+- `npm run test:amazon:return-parser` (pass)
+- `npm run test:delivery:money-recovery` (pass)
+
+Progress: 2026-02-19T00:12:00Z
+- Ran `npm run deliver:backfill:amazon` for previously rejected Amazon no-candidate events.
+- Selected 8 events and reset to pending, but delivery is currently blocked by MoneyRecovery 401 Unauthorized (token expired/invalid), so events remain pending for retry.

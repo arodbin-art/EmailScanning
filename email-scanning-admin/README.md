@@ -7,6 +7,7 @@ Standalone admin web application for configuring email scanning. This is a contr
 - Manage email accounts (configuration only).
 - Manage monitors and rules.
 - Review outbox events and delivery outcomes.
+- Configure per-mailbox MoneyRecovery `person_code` mappings for Amazon auto-create.
 
 ## Boundaries
 
@@ -57,6 +58,9 @@ All routes require admin auth and only touch configuration tables.
 - `VITE_API_BASE_URL`: Base URL for the admin API (default `http://localhost:4000`).
 - `VITE_ADMIN_TOKEN`: Admin token injected into API requests (optional).
   - If not set at build time, the UI will read `localStorage.email_scanning_admin_token` at runtime.
+
+Mail account field:
+- `moneyrecovery_person_code` (optional): when set, Amazon no-match events can auto-create RVIs for that mailbox.
 
 ## Development
 

@@ -65,6 +65,27 @@ Item returned: 1
 [ELEGOO Silk PLA Filament 1.75mm Purple...](https://www.amazon.ca/gp/product/B0DFPK4VRS)
 `
 
+const rodneyReturnBody = `
+Hello,
+
+Your return request is confirmed.
+Order ID: 702-9059320-9056262
+Item: AGM M8 Rugged Basic Flip Phone, 4G
+Refund subtotal: CAD $124.85
+Drop off by Mar 13
+Payment method ending in 1448
+`
+
+const janBoundaryBody = `
+Hello,
+
+Your return request is confirmed.
+Order ID: 702-9059320-9056262
+Item: AGM M8 Rugged Basic Flip Phone, 4G
+Refund subtotal: CAD $124.85
+Drop off by Jan 03
+`
+
 function assert(condition: boolean, message: string) {
   if (!condition) {
     throw new Error(message)
@@ -84,7 +105,7 @@ function runTests() {
   assert(returnParsed?.eventType === "amazon.return_requested", "return request event type")
   assert(returnParsed?.orderId === "112-1234567-1234567", "return request order id")
   if (returnParsed && returnParsed.eventType === "amazon.return_requested") {
-    assert(returnParsed.amount === 129.99, "return request amount")
+    assert(returnParsed.amountTotal === 129.99, "return request amount")
     assert(returnParsed.dropOffBy === "2026-03-15", "return request drop off by")
     assert(
       returnParsed.itemTitle === "Logitech MX Master 3 Mouse",
@@ -172,6 +193,35 @@ function runTests() {
       dropOffParsed.itemTitle.startsWith("ELEGOO Silk PLA Filament"),
       "drop-off item title"
     )
+  }
+
+  const rodneyParsed = parseAmazonReturnEmail({
+    provider: "gmail",
+    fromAddress: "return@amazon.ca",
+    subject: "Your return request is confirmed",
+    receivedAt: new Date("2026-02-18T00:00:00Z"),
+    normalizedBody: rodneyReturnBody,
+  })
+  assert(rodneyParsed !== null, "Rodney return email should parse")
+  assert(rodneyParsed?.eventType === "amazon.return_requested", "Rodney event type")
+  if (rodneyParsed && rodneyParsed.eventType === "amazon.return_requested") {
+    assert(rodneyParsed.orderId === "702-9059320-9056262", "Rodney order id")
+    assert(rodneyParsed.amountTotal === 124.85, "Rodney amount total")
+    assert(rodneyParsed.dropOffBy === "2026-03-13", "Rodney drop off by")
+    assert(rodneyParsed.itemTitle.startsWith("AGM M8"), "Rodney item title")
+    assert(rodneyParsed.paymentMethodLast4 === "1448", "Rodney payment last4")
+  }
+
+  const janBoundaryParsed = parseAmazonReturnEmail({
+    provider: "gmail",
+    fromAddress: "return@amazon.ca",
+    subject: "Your return request is confirmed",
+    receivedAt: new Date("2025-12-31T00:00:00Z"),
+    normalizedBody: janBoundaryBody,
+  })
+  assert(janBoundaryParsed !== null, "Jan boundary email should parse")
+  if (janBoundaryParsed && janBoundaryParsed.eventType === "amazon.return_requested") {
+    assert(janBoundaryParsed.dropOffBy === "2026-01-03", "Jan boundary year inference")
   }
 
   console.log("Amazon return parser tests passed")

@@ -90,6 +90,7 @@ app.post('/api/mail-accounts', async (req, res, next) => {
       account_label: parsed.account_label,
       mailbox_address: parsed.mailbox_address,
       auth_type: parsed.auth_type,
+      moneyrecovery_person_code: parsed.moneyrecovery_person_code ?? null,
       enabled: parsed.enabled ?? true,
       encrypted_credentials_ref: encryptedRef
     });
@@ -112,6 +113,7 @@ app.put('/api/mail-accounts/:id', async (req, res, next) => {
       account_label: parsed.account_label,
       mailbox_address: parsed.mailbox_address,
       auth_type: parsed.auth_type,
+      moneyrecovery_person_code: parsed.moneyrecovery_person_code ?? null,
       enabled: parsed.enabled ?? true
     });
     if (!data) {
@@ -262,10 +264,10 @@ app.get('/api/events', async (req, res, next) => {
   try {
     const statusRaw = typeof req.query.status === 'string' ? req.query.status : '';
     const status = statusRaw.toLowerCase();
-    const allowedStatuses: EventsOutboxStatus[] = ['pending', 'delivered', 'rejected'];
+    const allowedStatuses: EventsOutboxStatus[] = ['pending', 'delivered', 'needs_review', 'rejected'];
     const statusFilter = status ? (allowedStatuses.includes(status as EventsOutboxStatus) ? (status as EventsOutboxStatus) : null) : undefined;
     if (statusFilter === null) {
-      res.status(400).json({ error: 'Invalid status. Use pending, delivered, or rejected.' });
+      res.status(400).json({ error: 'Invalid status. Use pending, delivered, needs_review, or rejected.' });
       return;
     }
 

@@ -1,20 +1,24 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-18T23:40:00Z
+Last updated: 2026-02-19T00:12:00Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
 - Gmail ingestion works, GMAIL_QUERY is set to in:anywhere to include spam.
 - Admin web UI is running and can edit mail accounts and monitors.
 - Admin web UI now includes an Events page to review all outbox events, including rejected delivery responses.
+- Admin Mail Accounts UI now supports `moneyrecovery_person_code` mapping per mailbox.
 - Amazon return and refund parsing exists and emits amazon events to events_outbox.
 - Parser now handles item titles from subjects/links, drop-off dates without year, and drop-off confirmation emails.
+- Parser now extracts `amount_total` and optional `payment_method_last4` from return-request emails.
 - Amazon replay emitted 12 events to events_outbox.
 - Near-miss logging added for failed Amazon parsing (amazon_return_near_miss), with optional Azure OpenAI suggestions.
 - Amazon near-miss AI suggestions enabled in Azure dev job (AMAZON_AI_ENABLED=true).
 - Azure dev deployment created as a Container Apps Job (manual trigger) in rg-email-scanning-dev.
 - Azure Automation schedule now triggers the ingestion job and a delivery job every 30 minutes via runbook (managed identity).
 - Delivery job is configured with MoneyRecovery credentials in local `.env`; latest delivery run reached MoneyRecovery and rejected events with `no_candidate_rvi_found`.
+- Delivery logic now auto-creates RVIs when no candidate exists and `moneyrecovery_person_code` is configured for the source mail account.
+- No-match + missing person code now sets outbox status `needs_review` (instead of `rejected`).
 - Amazon return replay tool available for dry-run or emission from stored emails.
 - Azure Postgres firewall now has rule `allow-email-scanning-current` for current public IP.
 - Cron job installed to auto-refresh Azure Postgres firewall IP every 10 minutes.
@@ -56,6 +60,7 @@ Last updated: 2026-02-18T23:40:00Z
 - RVI_BASE_URL (MoneyRecovery API base)
 - RVI_BEARER_TOKEN (MoneyRecovery JWT, currently obtained via UI localStorage authToken)
 - RVI_DELIVERY_KIND=money_recovery
+- If `RVI_BEARER_TOKEN` is invalid/expired, events remain `pending` (401s are treated as retryable).
 
 ## Key commands
 - Ingestion poll: node dist/ingestion/index.js --provider gmail --limit 20
@@ -63,6 +68,7 @@ Last updated: 2026-02-18T23:40:00Z
 - Amazon replay (dry-run): npm run replay:amazon -- --since-days 14 --limit 50
 - Amazon replay (emit events): npm run replay:amazon -- --since-days 14 --limit 50 --emit
 - Delivery worker: node dist/delivery/index.js
+- Amazon rejected backfill: npm run deliver:backfill:amazon
 - Amazon near-miss query:
 - select * from amazon_return_near_miss order by received_at desc;
 
@@ -72,6 +78,7 @@ Last updated: 2026-02-18T23:40:00Z
 - events_outbox amazon events: 12 rows (after replay).
 - Amazon replay covers return request + drop-off confirmation templates.
 - Delivery run (2026-02-18T22:59Z): DB connectivity restored; 8 events moved to `rejected` with reason `no_candidate_rvi_found`.
+- Backfill run (2026-02-19T00:12Z): selected 8 previously rejected Amazon events; moved to `pending`, but current delivery attempts return 401 Unauthorized.
 - Admin app redeploy (2026-02-18T23:33Z): new UI bundle includes Events page and `/api/events` integration.
 
 ## Amazon return parsing
@@ -82,18 +89,22 @@ Last updated: 2026-02-18T23:40:00Z
 
 ## RVI integration plan
 - Signal engine emits Amazon events to `events_outbox`.
-- Delivery worker can translate Amazon events into MoneyRecovery API calls when configured:
+- Delivery worker translates Amazon events into MoneyRecovery API calls when configured:
 - Lookup `amazon_order_id` external reference (source `signal-engine`).
-- If missing, try `/rvi/returns/candidates?merchant=Amazon&amount_total=...` and only auto-link if there is exactly one candidate.
+- If missing, try `/rvi/returns/candidates?merchant=Amazon&amount_total=...`.
+- If still missing and source mail account has `moneyrecovery_person_code`, auto-create an RVI and attach external reference `amazon_order_id`.
+- If still missing and no person code mapping, mark outbox event `needs_review` with reason `missing_person_code_mapping_for_mail_account`.
 - For `amazon.return_dropped_off`, marks return flow submitted.
+- For `amazon.return_requested`, marks return requested and applies deadline/amount/title when available.
 - For `amazon.refund_issued`, marks return flow refunded (uses email received timestamp as `refunded_at`).
-- It does not auto-create RVIs because MoneyRecovery `POST /rvi` requires `person_code`, which is not derivable from emails safely.
+- Auto-create is now allowed via explicit per-mail-account person code mapping.
 
 ## Next steps
-- Add or sync MoneyRecovery external references for Amazon order IDs so candidate matching can resolve uniquely.
-- Re-run delivery after references/candidates are available:
-- Command: `npm run deliver`
-- Optional: add a dedicated admin table/page for unresolved candidate diagnostics.
+- Set/verify `moneyrecovery_person_code` for all Amazon mail accounts in Admin Hub (`/admin/mail-accounts`).
+- Refresh `RVI_BEARER_TOKEN` (current runs are 401 Unauthorized), then run:
+- `npm run deliver`
+- `npm run deliver:backfill:amazon`
+- Verify Events page (`/admin/events`) shows `delivered` or `needs_review` instead of stuck `pending`.
 
 ## Notes
 - Database schema is email_scanning in the signal_engine database.

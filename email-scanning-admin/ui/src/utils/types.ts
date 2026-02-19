@@ -4,6 +4,7 @@ export type MailAccount = {
   account_label: string;
   mailbox_address: string;
   auth_type: string;
+  moneyrecovery_person_code: string | null;
   enabled: boolean;
   created_at: string;
 };
@@ -29,7 +30,7 @@ export type Monitor = {
   updated_at: string;
 };
 
-export type EventStatus = 'pending' | 'delivered' | 'rejected';
+export type EventStatus = 'pending' | 'delivered' | 'needs_review' | 'rejected';
 
 export type SignalEvent = {
   id: number;

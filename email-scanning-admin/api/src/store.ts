@@ -47,6 +47,7 @@ export async function listMailAccounts(): Promise<MailAccountRecord[]> {
       account_label,
       mailbox_address,
       auth_type,
+      moneyrecovery_person_code,
       enabled,
       created_at
     FROM email_scanning.mail_accounts
@@ -59,6 +60,7 @@ export async function createMailAccount(input: {
   account_label: string;
   mailbox_address: string;
   auth_type: string;
+  moneyrecovery_person_code: string | null;
   enabled: boolean;
   encrypted_credentials_ref: string;
 }): Promise<MailAccountRecord> {
@@ -69,6 +71,7 @@ export async function createMailAccount(input: {
       mailbox_address,
       auth_type,
       encrypted_credentials_ref,
+      moneyrecovery_person_code,
       enabled,
       created_at
     ) VALUES (
@@ -77,6 +80,7 @@ export async function createMailAccount(input: {
       ${input.mailbox_address},
       ${input.auth_type},
       ${input.encrypted_credentials_ref},
+      ${input.moneyrecovery_person_code},
       ${input.enabled},
       NOW()
     )
@@ -86,6 +90,7 @@ export async function createMailAccount(input: {
       account_label,
       mailbox_address,
       auth_type,
+      moneyrecovery_person_code,
       enabled,
       created_at
   `) as MailAccountRecord[];
@@ -99,6 +104,7 @@ export async function updateMailAccount(
     account_label: string;
     mailbox_address: string;
     auth_type: string;
+    moneyrecovery_person_code: string | null;
     enabled: boolean;
   }
 ): Promise<MailAccountRecord | null> {
@@ -109,6 +115,7 @@ export async function updateMailAccount(
       account_label = ${input.account_label},
       mailbox_address = ${input.mailbox_address},
       auth_type = ${input.auth_type},
+      moneyrecovery_person_code = ${input.moneyrecovery_person_code},
       enabled = ${input.enabled}
     WHERE id = ${id}
     RETURNING
@@ -117,6 +124,7 @@ export async function updateMailAccount(
       account_label,
       mailbox_address,
       auth_type,
+      moneyrecovery_person_code,
       enabled,
       created_at
   `) as MailAccountRecord[];

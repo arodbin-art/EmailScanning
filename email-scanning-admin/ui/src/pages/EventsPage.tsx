@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { apiRequest } from '../utils/api';
-import { EventStatus, SignalEvent } from '../utils/types';
+import { EventStatus, MailAccount, SignalEvent } from '../utils/types';
 
 const statuses: Array<{ label: string; value: '' | EventStatus }> = [
   { label: 'All', value: '' },
   { label: 'Pending', value: 'pending' },
   { label: 'Delivered', value: 'delivered' },
+  { label: 'Needs Review', value: 'needs_review' },
   { label: 'Rejected', value: 'rejected' }
 ];
 
@@ -28,8 +29,15 @@ function jsonPreview(value: unknown): string {
 
 export default function EventsPage() {
   const [events, setEvents] = useState<SignalEvent[]>([]);
+  const [mailAccounts, setMailAccounts] = useState<MailAccount[]>([]);
   const [status, setStatus] = useState<'' | EventStatus>('');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiRequest<MailAccount[]>('/api/mail-accounts')
+      .then((response) => setMailAccounts(response.data))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams({ limit: '300' });
@@ -44,6 +52,12 @@ export default function EventsPage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load events'));
   }, [status]);
+
+  const missingPersonCodes = mailAccounts.filter(
+    (account) =>
+      account.provider.toLowerCase() === 'gmail' &&
+      !account.moneyrecovery_person_code
+  );
 
   return (
     <div>
@@ -62,6 +76,13 @@ export default function EventsPage() {
           </button>
         ))}
       </div>
+
+      {missingPersonCodes.length > 0 && (
+        <div className="notice">
+          Amazon automation warning: {missingPersonCodes.length} Gmail account(s) have no
+          MoneyRecovery person code mapping. No-match Amazon events will be set to needs_review.
+        </div>
+      )}
 
       {error && <div className="notice">{error}</div>}
 

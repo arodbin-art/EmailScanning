@@ -4,6 +4,7 @@ export type MailAccountRecord = {
   account_label: string;
   mailbox_address: string;
   auth_type: string;
+  moneyrecovery_person_code: string | null;
   enabled: boolean;
   created_at: string;
 };
@@ -34,7 +35,7 @@ export type ValidationWarning = {
   message: string;
 };
 
-export type EventsOutboxStatus = 'pending' | 'delivered' | 'rejected';
+export type EventsOutboxStatus = 'pending' | 'delivered' | 'needs_review' | 'rejected';
 
 export type EventRecord = {
   id: number;

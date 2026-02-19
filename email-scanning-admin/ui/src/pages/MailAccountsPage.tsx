@@ -7,6 +7,7 @@ const emptyForm = {
   account_label: '',
   mailbox_address: '',
   auth_type: 'graph',
+  moneyrecovery_person_code: '',
   enabled: true
 };
 
@@ -33,6 +34,7 @@ export default function MailAccountsPage() {
       account_label: account.account_label,
       mailbox_address: account.mailbox_address,
       auth_type: account.auth_type,
+      moneyrecovery_person_code: account.moneyrecovery_person_code ?? '',
       enabled: account.enabled
     });
   };
@@ -44,7 +46,10 @@ export default function MailAccountsPage() {
 
   const submitForm = async () => {
     setError(null);
-    const payload = { ...form };
+    const payload = {
+      ...form,
+      moneyrecovery_person_code: form.moneyrecovery_person_code.trim() || null
+    };
     try {
       if (editingId) {
         await apiRequest(`/api/mail-accounts/${editingId}`, {
@@ -64,6 +69,12 @@ export default function MailAccountsPage() {
     }
   };
 
+  const amazonMissingPersonCode = accounts.filter(
+    (account) =>
+      account.provider.toLowerCase() === 'gmail' &&
+      !account.moneyrecovery_person_code
+  );
+
   const deleteAccount = async (id: number) => {
     if (!confirm('Delete this mail account?')) return;
     try {
@@ -80,6 +91,12 @@ export default function MailAccountsPage() {
         <h1 className="page-title">Mail Accounts</h1>
       </div>
       {error && <div className="notice">{error}</div>}
+      {amazonMissingPersonCode.length > 0 && (
+        <div className="notice">
+          Amazon automation warning: {amazonMissingPersonCode.length} Gmail account(s) have no
+          MoneyRecovery person code mapping. Amazon no-match events will go to needs_review.
+        </div>
+      )}
       <div className="card section">
         <div className="form-grid">
           <div className="form-field">
@@ -125,6 +142,20 @@ export default function MailAccountsPage() {
               <option value="false">Disabled</option>
             </select>
           </div>
+          <div className="form-field">
+            <label>MoneyRecovery Person Code</label>
+            <input
+              className="input"
+              placeholder="e.g. ROD"
+              value={form.moneyrecovery_person_code}
+              onChange={(event) =>
+                setForm({ ...form, moneyrecovery_person_code: event.target.value.toUpperCase() })
+              }
+            />
+            <span className="helper">
+              Required for auto-creating RVIs when Amazon events have no existing candidate.
+            </span>
+          </div>
         </div>
         <div className="button-group section">
           <button className="button" onClick={submitForm}>
@@ -144,6 +175,7 @@ export default function MailAccountsPage() {
               <th>Label</th>
               <th>Provider</th>
               <th>Address</th>
+              <th>Person Code</th>
               <th>Enabled</th>
               <th></th>
             </tr>
@@ -154,6 +186,7 @@ export default function MailAccountsPage() {
                 <td>{account.account_label}</td>
                 <td>{account.provider}</td>
                 <td>{account.mailbox_address}</td>
+                <td>{account.moneyrecovery_person_code || '—'}</td>
                 <td>
                   <span className={`badge ${account.enabled ? 'success' : 'disabled'}`}>
                     {account.enabled ? 'Enabled' : 'Disabled'}
@@ -173,7 +206,7 @@ export default function MailAccountsPage() {
             ))}
             {accounts.length === 0 && (
               <tr>
-                <td colSpan={5}>No mail accounts configured.</td>
+                <td colSpan={6}>No mail accounts configured.</td>
               </tr>
             )}
           </tbody>

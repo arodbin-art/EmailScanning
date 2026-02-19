@@ -32,6 +32,29 @@ function summarizeMonitor(monitor: Monitor) {
   return rules.length > 0 ? rules.join(' · ') : 'No rules defined';
 }
 
+function looksLikeAmazonMonitor(monitor: Monitor): boolean {
+  const values = [
+    monitor.name,
+    monitor.from_contains,
+    monitor.subject_contains,
+    monitor.subject_regex,
+    monitor.body_regex,
+    monitor.gmail_label
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase());
+  if (values.some((value) => value.includes('amazon'))) {
+    return true;
+  }
+  if (monitor.sender_rules) {
+    const text = JSON.stringify(monitor.sender_rules).toLowerCase();
+    if (text.includes('amazon')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export default function MonitorsPage() {
   const [monitors, setMonitors] = useState<Monitor[]>([]);
   const [mailAccounts, setMailAccounts] = useState<MailAccount[]>([]);
@@ -59,6 +82,26 @@ export default function MonitorsPage() {
   const accountLookup = useMemo(() => {
     return new Map(mailAccounts.map((account) => [account.id, account]));
   }, [mailAccounts]);
+
+  const amazonWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    const candidateMonitors = monitors.filter((monitor) => monitor.enabled && looksLikeAmazonMonitor(monitor));
+    for (const monitor of candidateMonitors) {
+      const scoped = monitor.mail_account_ids?.length
+        ? monitor.mail_account_ids
+            .map((id) => accountLookup.get(id))
+            .filter((account): account is MailAccount => Boolean(account))
+        : mailAccounts.filter((account) => account.provider.toLowerCase() === monitor.provider.toLowerCase());
+
+      const missing = scoped.filter((account) => !account.moneyrecovery_person_code);
+      if (missing.length > 0) {
+        warnings.push(
+          `Monitor "${monitor.name}" has ${missing.length} mail account(s) missing MoneyRecovery person code mapping.`
+        );
+      }
+    }
+    return warnings;
+  }, [monitors, mailAccounts, accountLookup]);
 
   const duplicateMonitor = async (monitor: Monitor) => {
     setError(null);
@@ -111,6 +154,13 @@ export default function MonitorsPage() {
       {warnings.length > 0 && (
         <div className="notice">
           {warnings.map((warning) => (
+            <div key={warning}>{warning}</div>
+          ))}
+        </div>
+      )}
+      {amazonWarnings.length > 0 && (
+        <div className="notice">
+          {amazonWarnings.map((warning) => (
             <div key={warning}>{warning}</div>
           ))}
         </div>

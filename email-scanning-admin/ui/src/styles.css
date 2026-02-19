@@ -178,6 +178,11 @@ a {
   color: #166534;
 }
 
+.badge.event-needs_review {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .badge.event-rejected {
   background: #fee2e2;
   color: #991b1b;

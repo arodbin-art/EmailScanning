@@ -10,6 +10,7 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
     'mailbox_address',
     'auth_type',
     'encrypted_credentials_ref',
+    'moneyrecovery_person_code',
     'enabled',
     'created_at'
   ],

@@ -51,6 +51,18 @@ Run the worker:
 npm run deliver
 ```
 
+Behavior:
+- Primary match: external reference `amazon_order_id` (source `signal-engine`)
+- Secondary match: `/rvi/returns/candidates` by merchant + amount
+- Fallback create: if no match and source mail account has `moneyrecovery_person_code`, auto-create RVI and attach external reference
+- No person code mapping: event status becomes `needs_review`
+- Transient auth/outage errors (401/403/404/429/5xx): event remains `pending` for retry
+
+Backfill previously rejected no-candidate Amazon events:
+```
+npm run deliver:backfill:amazon
+```
+
 ## Amazon near-miss logging + AI fallback
 When an Amazon return/refund email fails deterministic parsing, the system records a near-miss row in `amazon_return_near_miss` for tuning.
 

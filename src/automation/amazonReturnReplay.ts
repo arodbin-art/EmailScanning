@@ -95,8 +95,12 @@ function buildPayload(email: EmailRow, parsed: AmazonReturnParseResult): Record<
   }
 
   if (parsed.eventType === "amazon.return_requested") {
-    payload.amount = parsed.amount
+    payload.amount_total = parsed.amountTotal
+    payload.amount = parsed.amountTotal
     payload.drop_off_by = parsed.dropOffBy
+    if (parsed.paymentMethodLast4) {
+      payload.payment_method_last4 = parsed.paymentMethodLast4
+    }
   } else if (parsed.eventType === "amazon.refund_issued") {
     payload.refund_amount = parsed.refundAmount
   } else if (parsed.eventType === "amazon.return_dropped_off") {

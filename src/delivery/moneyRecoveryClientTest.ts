@@ -6,51 +6,146 @@ function assert(condition: unknown, message: string) {
   }
 }
 
-async function main() {
-  const calls: Array<{ url: string; method: string; body?: any }> = []
+type Call = { url: string; method: string; body?: any }
 
-  // Minimal fetch mock for a happy-path: lookup -> 404 -> candidates 1 -> upsert ref -> rvi detail -> refund.
+async function testCreateWhenNoMatchAndPersonCode(): Promise<void> {
+  const calls: Call[] = []
   globalThis.fetch = (async (url: any, init: any) => {
-    calls.push({ url: String(url), method: init?.method ?? "GET", body: init?.body ? JSON.parse(init.body) : undefined })
-
     const u = String(url)
-    if (u.includes("/rvi/external-references/lookup")) {
-      return mkRes(404, { error: "not found" })
-    }
-    if (u.includes("/rvi/returns/candidates")) {
-      return mkRes(200, { data: [{ id: 123, return_flow_id: 456 }] })
-    }
-    if (u.includes("/rvi/123/external-references")) {
-      return mkRes(200, { rvi_id: 123, source: "signal-engine", ref_type: "amazon_order_id", ref_value: "701-1111111-2222222" })
-    }
-    if (u.endsWith("/rvi/123")) {
-      return mkRes(200, { flows: [{ id: 456, type: "return" }] })
-    }
-    if (u.includes("/return-flows/456/refund")) {
-      return mkRes(200, { ok: true })
-    }
-    if (u.includes("/return-flows/456")) {
-      return mkRes(200, { ok: true })
-    }
+    calls.push({ url: u, method: init?.method ?? "GET", body: init?.body ? JSON.parse(init.body) : undefined })
+
+    if (u.includes("/rvi/external-references/lookup")) return mkRes(404, { error: "not found" })
+    if (u.includes("/rvi/returns/candidates")) return mkRes(200, { data: [] })
+    if (u.endsWith("/rvi")) return mkRes(201, { id: 901 })
+    if (u.includes("/rvi/901/external-references")) return mkRes(200, { ok: true })
+    if (u.endsWith("/rvi/901")) return mkRes(200, { flows: [{ id: 301, type: "return" }] })
+    if (u.includes("/return-flows/301")) return mkRes(200, { ok: true })
 
     return mkRes(500, { error: "unexpected", url: u })
   }) as any
 
   const client = new MoneyRecoveryClient({ baseUrl: "https://example.test", bearerToken: "x", timeoutMs: 1000 })
   const result = await client.deliverOutboxEvent({
-    eventType: "amazon.refund_issued",
+    eventId: 1,
+    eventType: "amazon.return_requested",
+    sourceEmailId: 11,
+    mailAccountId: 2,
+    mailAccountPersonCode: "ROD",
     payload: {
-      order_id: "701-1111111-2222222",
-      refund_amount: 12.34,
-      email: { received_at: "2026-02-07T00:00:00.000Z" },
+      order_id: "702-9059320-9056262",
+      amount_total: 124.85,
+      drop_off_by: "2026-03-13",
+      item_title: "AGM M8 Rugged Basic Flip Phone, 4G",
+      email: { received_at: "2026-02-18T20:00:00.000Z", subject: "Your return request is confirmed" },
     },
   })
 
   assert(result.status === "accepted", `expected accepted, got ${result.status}`)
-  assert(calls.some((c) => c.url.includes("/rvi/returns/candidates")), "expected candidates lookup")
-  assert(calls.some((c) => c.url.includes("/rvi/123/external-references")), "expected external ref upsert")
-  assert(calls.some((c) => c.url.includes("/return-flows/456/refund")), "expected refund call")
+  assert(calls.some((c) => c.url.endsWith("/rvi") && c.method === "POST"), "expected create RVI")
+  assert(calls.some((c) => c.url.includes("/rvi/901/external-references")), "expected external ref link")
+  assert(calls.some((c) => c.url.includes("/return-flows/301")), "expected return flow requested update")
+}
 
+async function testReplayDoesNotDuplicateCreate(): Promise<void> {
+  const calls: Call[] = []
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = String(url)
+    calls.push({ url: u, method: init?.method ?? "GET", body: init?.body ? JSON.parse(init.body) : undefined })
+
+    if (u.includes("/rvi/external-references/lookup")) return mkRes(200, { rvi_id: 901 })
+    if (u.includes("/rvi/901/external-references")) return mkRes(200, { ok: true })
+    if (u.endsWith("/rvi/901")) return mkRes(200, { flows: [{ id: 301, type: "return" }] })
+    if (u.includes("/return-flows/301")) return mkRes(200, { ok: true })
+
+    return mkRes(500, { error: "unexpected", url: u })
+  }) as any
+
+  const client = new MoneyRecoveryClient({ baseUrl: "https://example.test", bearerToken: "x", timeoutMs: 1000 })
+  const result = await client.deliverOutboxEvent({
+    eventId: 2,
+    eventType: "amazon.return_requested",
+    sourceEmailId: 12,
+    mailAccountId: 2,
+    mailAccountPersonCode: "ROD",
+    payload: {
+      order_id: "702-9059320-9056262",
+      amount_total: 124.85,
+      drop_off_by: "2026-03-13",
+      item_title: "AGM M8 Rugged Basic Flip Phone, 4G",
+      email: { received_at: "2026-02-18T20:00:00.000Z", subject: "Your return request is confirmed" },
+    },
+  })
+
+  assert(result.status === "accepted", `expected accepted, got ${result.status}`)
+  assert(!calls.some((c) => c.url.endsWith("/rvi") && c.method === "POST"), "should not create duplicate RVI")
+}
+
+async function testNeedsReviewWhenPersonCodeMissing(): Promise<void> {
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = String(url)
+    if (u.includes("/rvi/external-references/lookup")) return mkRes(404, { error: "not found" })
+    if (u.includes("/rvi/returns/candidates")) return mkRes(200, { data: [] })
+    return mkRes(500, { error: "unexpected", url: u, method: init?.method })
+  }) as any
+
+  const client = new MoneyRecoveryClient({ baseUrl: "https://example.test", bearerToken: "x", timeoutMs: 1000 })
+  const result = await client.deliverOutboxEvent({
+    eventId: 3,
+    eventType: "amazon.return_requested",
+    sourceEmailId: 13,
+    mailAccountId: 7,
+    mailAccountPersonCode: null,
+    payload: {
+      order_id: "701-1111111-2222222",
+      amount_total: 12.34,
+      email: { received_at: "2026-02-18T20:00:00.000Z" },
+    },
+  })
+
+  assert(result.status === "needs_review", `expected needs_review, got ${result.status}`)
+  assert((result.raw as any)?.reason === "missing_person_code_mapping_for_mail_account", "expected missing mapping reason")
+}
+
+async function testRefundIssuedArrivesFirst(): Promise<void> {
+  const calls: Call[] = []
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = String(url)
+    calls.push({ url: u, method: init?.method ?? "GET", body: init?.body ? JSON.parse(init.body) : undefined })
+
+    if (u.includes("/rvi/external-references/lookup")) return mkRes(404, { error: "not found" })
+    if (u.includes("/rvi/returns/candidates")) return mkRes(200, { data: [] })
+    if (u.endsWith("/rvi")) return mkRes(201, { id: 777 })
+    if (u.includes("/rvi/777/external-references")) return mkRes(200, { ok: true })
+    if (u.endsWith("/rvi/777")) return mkRes(200, { flows: [{ id: 888, type: "return" }] })
+    if (u.includes("/return-flows/888/refund")) return mkRes(200, { ok: true })
+
+    return mkRes(500, { error: "unexpected", url: u })
+  }) as any
+
+  const client = new MoneyRecoveryClient({ baseUrl: "https://example.test", bearerToken: "x", timeoutMs: 1000 })
+  const result = await client.deliverOutboxEvent({
+    eventId: 4,
+    eventType: "amazon.refund_issued",
+    sourceEmailId: 14,
+    mailAccountId: 4,
+    mailAccountPersonCode: "ROD",
+    payload: {
+      order_id: "701-1111111-2222222",
+      refund_amount: 45.19,
+      email: { received_at: "2026-02-18T20:00:00.000Z" },
+    },
+  })
+
+  assert(result.status === "accepted", `expected accepted, got ${result.status}`)
+  assert(calls.some((c) => c.url.endsWith("/rvi") && c.method === "POST"), "expected create when refund arrives first")
+  assert(calls.some((c) => c.url.includes("/return-flows/888/refund")), "expected immediate refund call")
+}
+
+async function main() {
+  await testCreateWhenNoMatchAndPersonCode()
+  await testReplayDoesNotDuplicateCreate()
+  await testNeedsReviewWhenPersonCodeMissing()
+  await testRefundIssuedArrivesFirst()
   console.log("moneyRecoveryClientTest ok")
 }
 
@@ -68,4 +163,3 @@ main().catch((err) => {
   console.error(err)
   process.exit(1)
 })
-

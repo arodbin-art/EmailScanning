@@ -6,6 +6,12 @@ export const mailAccountInputSchema = z.object({
   account_label: z.string().min(1).max(100),
   mailbox_address: z.string().min(3).max(320),
   auth_type: z.string().min(1).max(50),
+  moneyrecovery_person_code: z
+    .string()
+    .trim()
+    .regex(/^[A-Z0-9][A-Z0-9_-]{1,31}$/)
+    .optional()
+    .nullable(),
   enabled: z.boolean().optional(),
   encrypted_credentials_ref: z.string().min(1).optional()
 });

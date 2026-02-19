@@ -15,6 +15,7 @@
     "poll": "node --no-warnings ./dist/ingestion/index.js",
     "retention:check": "node --no-warnings ./dist/maintenance/retentionCheck.js",
     "deliver": "node --no-warnings ./dist/delivery/index.js",
+    "deliver:backfill:amazon": "node --no-warnings ./dist/delivery/backfillAmazonRejected.js",
     "replay:amazon": "node --no-warnings ./dist/automation/amazonReturnReplay.js",
     "test:amazon:return-parser": "tsc -p tsconfig.json && node --no-warnings dist/automation/amazonReturnParserTest.js",
     "test:delivery:money-recovery": "tsc -p tsconfig.json && node --no-warnings dist/delivery/moneyRecoveryClientTest.js"

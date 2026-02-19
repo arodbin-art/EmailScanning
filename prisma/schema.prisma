@@ -21,6 +21,7 @@ enum EmailMonitorStatusState {
 enum EventsOutboxStatus {
   pending
   delivered
+  needs_review
   rejected
 
   @@map("events_outbox_status")
@@ -33,6 +34,7 @@ model MailAccount {
   mailboxAddress           String     @map("mailbox_address") @db.VarChar(320)
   authType                 String     @map("auth_type") @db.VarChar(50)
   encryptedCredentialsRef  String     @map("encrypted_credentials_ref") @db.Text
+  moneyRecoveryPersonCode  String?    @map("moneyrecovery_person_code") @db.Text
   enabled                  Boolean    @default(true)
   createdAt                DateTime   @map("created_at") @db.Timestamp(6)
   emails                   EmailRaw[]

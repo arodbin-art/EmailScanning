@@ -11,9 +11,10 @@ export type AmazonReturnEmailInput = {
 export type AmazonReturnRequested = {
   eventType: "amazon.return_requested"
   orderId: string
-  amount: number
+  amountTotal: number
   dropOffBy: string
   itemTitle: string
+  paymentMethodLast4?: string
 }
 
 export type AmazonRefundIssued = {
@@ -61,6 +62,7 @@ const SUBJECT_ITEM_PREFIXES = [
   /^your return drop-off confirmation for\s+/i,
 ]
 const REFUND_BY_PATTERN = /refund will be issued by\s*(.+)$/i
+const PAYMENT_LAST4_PATTERN = /(?:ending in|last\s*4|card)\s*[:#-]?\s*(\d{4})\b/i
 
 export function parseAmazonReturnEmail(input: AmazonReturnEmailInput): AmazonReturnParseResult | null {
   if (!isAmazonReturnSender(input.provider, input.fromAddress)) {
@@ -77,7 +79,7 @@ export function parseAmazonReturnEmail(input: AmazonReturnEmailInput): AmazonRet
   }
 
   if (RETURN_REQUEST_SUBJECT.test(subject) || RETURN_REQUEST_SUBJECT.test(text)) {
-    const amount = extractAmountByLabels(text, ["refund amount", "estimated refund", "refund total"]) ??
+    const amount = extractAmountByLabels(text, ["refund amount", "estimated refund", "refund total", "refund subtotal", "total estimated refund"]) ??
       extractAnyAmount(text)
     const dropOffBy = extractDropOffBy(text, input.receivedAt)
     const itemTitle = extractItemTitle(text, subject)
@@ -89,9 +91,10 @@ export function parseAmazonReturnEmail(input: AmazonReturnEmailInput): AmazonRet
     return {
       eventType: "amazon.return_requested",
       orderId,
-      amount,
+      amountTotal: amount,
       dropOffBy,
       itemTitle,
+      paymentMethodLast4: extractPaymentMethodLast4(text) ?? undefined,
     }
   }
 
@@ -178,12 +181,12 @@ export function detectAmazonReturnNearMiss(
   if (matchesReturnRequest) {
     const missing: string[] = []
     const amount =
-      extractAmountByLabels(text, ["refund amount", "estimated refund", "refund total"]) ??
+      extractAmountByLabels(text, ["refund amount", "estimated refund", "refund total", "refund subtotal", "total estimated refund"]) ??
       extractAnyAmount(text)
     const dropOffBy = extractDropOffBy(text, input.receivedAt)
     const itemTitle = extractItemTitle(text, subject)
 
-    if (!amount) missing.push("amount")
+    if (!amount) missing.push("amount_total")
     if (!dropOffBy) missing.push("drop_off_by")
     if (!itemTitle) missing.push("item_title")
 
@@ -342,7 +345,9 @@ function parseAmazonDate(value: string, referenceDate?: Date): string | null {
   }
   const monthName = match[1].toLowerCase()
   const day = Number(match[2])
-  const year = match[3] ? Number(match[3]) : (referenceDate?.getUTCFullYear() ?? new Date().getUTCFullYear())
+  const explicitYear = match[3] ? Number(match[3]) : null
+  const baseYear = referenceDate?.getUTCFullYear() ?? new Date().getUTCFullYear()
+  const year = explicitYear ?? inferBestYear(baseYear, monthName, day, referenceDate)
   const month = monthNameToNumber(monthName)
   if (!month || !Number.isFinite(day) || !Number.isFinite(year)) {
     return null
@@ -350,6 +355,33 @@ function parseAmazonDate(value: string, referenceDate?: Date): string | null {
   const mm = String(month).padStart(2, "0")
   const dd = String(day).padStart(2, "0")
   return `${year}-${mm}-${dd}`
+}
+
+function inferBestYear(baseYear: number, monthName: string, day: number, referenceDate?: Date): number {
+  if (!referenceDate) {
+    return baseYear
+  }
+  const month = monthNameToNumber(monthName)
+  if (!month) {
+    return baseYear
+  }
+
+  const candidates = [baseYear - 1, baseYear, baseYear + 1]
+    .map((year) => {
+      const date = Date.UTC(year, month - 1, day)
+      const deltaDays = Math.abs(date - referenceDate.getTime()) / (24 * 60 * 60 * 1000)
+      return { year, date, deltaDays }
+    })
+    .sort((a, b) => a.deltaDays - b.deltaDays)
+
+  // If tied, prefer near-future dates for operational deadlines.
+  const best = candidates[0]
+  const close = candidates.find(
+    (candidate) =>
+      Math.abs(candidate.deltaDays - best.deltaDays) < 1 &&
+      candidate.date >= referenceDate.getTime()
+  )
+  return (close ?? best).year
 }
 
 function monthNameToNumber(monthName: string): number | null {
@@ -436,6 +468,17 @@ function extractRefundBy(text: string, receivedAt?: Date): string | null {
       if (parsed) {
         return parsed
       }
+    }
+  }
+  return null
+}
+
+function extractPaymentMethodLast4(text: string): string | null {
+  const lines = toLines(text)
+  for (const line of lines) {
+    const match = line.match(PAYMENT_LAST4_PATTERN)
+    if (match?.[1]) {
+      return match[1]
     }
   }
   return null
