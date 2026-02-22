@@ -31,6 +31,7 @@ export default function EventsPage() {
   const [events, setEvents] = useState<SignalEvent[]>([]);
   const [mailAccounts, setMailAccounts] = useState<MailAccount[]>([]);
   const [status, setStatus] = useState<'' | EventStatus>('');
+  const [eventPrefix, setEventPrefix] = useState<'' | 'amazon' | 'manulife'>('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,6 +45,9 @@ export default function EventsPage() {
     if (status) {
       params.set('status', status);
     }
+    if (eventPrefix) {
+      params.set('event_prefix', eventPrefix);
+    }
 
     apiRequest<SignalEvent[]>(`/api/events?${params.toString()}`)
       .then((response) => {
@@ -51,7 +55,7 @@ export default function EventsPage() {
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load events'));
-  }, [status]);
+  }, [status, eventPrefix]);
 
   const missingPersonCodes = mailAccounts.filter(
     (account) =>
@@ -75,6 +79,21 @@ export default function EventsPage() {
             {tab.label}
           </button>
         ))}
+      </div>
+
+      <div className="form-field section" style={{ maxWidth: 280 }}>
+        <label>Event Family</label>
+        <select
+          className="select"
+          value={eventPrefix}
+          onChange={(event) =>
+            setEventPrefix(event.target.value as '' | 'amazon' | 'manulife')
+          }
+        >
+          <option value="">All</option>
+          <option value="amazon">Amazon</option>
+          <option value="manulife">Manulife</option>
+        </select>
       </div>
 
       {missingPersonCodes.length > 0 && (

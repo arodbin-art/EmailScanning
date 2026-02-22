@@ -1,0 +1,13 @@
+[Unit]
+Description=EmailScanning Scheduled Cycle (poll + deliver)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/media/nas/workspaces/EmailScanning
+EnvironmentFile=/media/nas/workspaces/EmailScanning/.env
+ExecStart=/bin/bash -lc 'mkdir -p /media/nas/workspaces/EmailScanning/logs && /usr/bin/npm run run:scheduled >> /media/nas/workspaces/EmailScanning/logs/email-scanning.log 2>&1'
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

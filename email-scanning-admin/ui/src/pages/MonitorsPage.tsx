@@ -132,6 +132,75 @@ export default function MonitorsPage() {
     }
   };
 
+  const createAmazonTemplate = async () => {
+    setError(null);
+    try {
+      await apiRequest('/api/monitors', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Amazon Returns Template',
+          enabled: true,
+          provider: 'gmail',
+          scope: 'all',
+          mail_account_ids: [],
+          sender_rules: null,
+          from_contains: 'return@amazon.ca',
+          subject_contains: null,
+          subject_regex: 'return request is confirmed|refund|return drop-off confirmation',
+          body_regex: null,
+          has_attachments: null,
+          gmail_label: null,
+          ai_prompt_template: null,
+          confidence_threshold: 0.9,
+          allowed_event_types: [
+            'amazon.return_requested',
+            'amazon.return_dropped_off',
+            'amazon.refund_issued'
+          ]
+        })
+      });
+      loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create Amazon template');
+    }
+  };
+
+  const createManulifeTemplate = async () => {
+    setError(null);
+    try {
+      await apiRequest('/api/monitors', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Manulife Claims Template',
+          enabled: true,
+          provider: 'gmail',
+          scope: 'all',
+          mail_account_ids: [],
+          sender_rules: null,
+          from_contains: 'manulife',
+          subject_contains: null,
+          subject_regex: 'claim|reimbursement|benefit',
+          body_regex: null,
+          has_attachments: null,
+          gmail_label: null,
+          ai_prompt_template: null,
+          confidence_threshold: 0.85,
+          allowed_event_types: [
+            'manulife.claim_received',
+            'manulife.claim_processed',
+            'manulife.claim_paid',
+            'manulife.claim_denied',
+            'manulife.claim_info_required',
+            'manulife.claim_status_update'
+          ]
+        })
+      });
+      loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create Manulife template');
+    }
+  };
+
   const deleteMonitor = async (id: string) => {
     if (!confirm('Delete this monitor?')) return;
     try {
@@ -146,9 +215,17 @@ export default function MonitorsPage() {
     <div>
       <div className="page-header">
         <h1 className="page-title">Monitors</h1>
-        <button className="button" onClick={() => navigate('/admin/monitors/new')}>
-          Create Monitor
-        </button>
+        <div className="button-group">
+          <button className="button secondary" onClick={createAmazonTemplate}>
+            Add Amazon Template
+          </button>
+          <button className="button secondary" onClick={createManulifeTemplate}>
+            Add Manulife Template
+          </button>
+          <button className="button" onClick={() => navigate('/admin/monitors/new')}>
+            Create Monitor
+          </button>
+        </div>
       </div>
       {error && <div className="notice">{error}</div>}
       {warnings.length > 0 && (

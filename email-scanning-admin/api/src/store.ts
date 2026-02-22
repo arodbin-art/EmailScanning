@@ -359,11 +359,23 @@ export async function getMailAccountProviders(ids: number[]): Promise<string[]> 
 
 export async function listEvents(input: {
   status?: EventsOutboxStatus;
+  eventTypePrefix?: "amazon" | "manulife";
   limit?: number;
 }): Promise<EventRecord[]> {
-  const whereClause = input.status
-    ? Prisma.sql`WHERE eo.status = ${input.status}::email_scanning.events_outbox_status`
-    : Prisma.empty;
+  const filters: Prisma.Sql[] = [];
+  if (input.status) {
+    filters.push(
+      Prisma.sql`eo.status = ${input.status}::email_scanning.events_outbox_status`
+    );
+  }
+  if (input.eventTypePrefix) {
+    filters.push(Prisma.sql`eo.event_type LIKE ${`${input.eventTypePrefix}.%`}`);
+  }
+
+  const whereClause =
+    filters.length > 0
+      ? Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`
+      : Prisma.empty;
   const limit = Math.max(1, Math.min(input.limit ?? 200, 1000));
 
   const rows = (await prisma.$queryRaw(Prisma.sql`

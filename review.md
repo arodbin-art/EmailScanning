@@ -1,12 +1,14 @@
-There are functional issues that can cause the poller to fail in environments without AI credentials and to run twice when RUN_POLL_ON_START is enabled, leading to duplicate ingestion.
+Current review status (2026-02-22):
 
-Full review comments:
+- Previous P2 issue (AI missing credentials caused poll failure): resolved.
+  - `createAiClient()` now degrades to rules-only mode when key is missing.
+- Previous P2 issue (double polling from CLI entrypoint): resolved.
+  - `ingestion/index.ts` now has an explicit single-run path and a regression test harness (`test:ingestion:entrypoint`).
 
-- [P2] Avoid failing polls when AI is intentionally unset — /media/nas/workspaces/EmailScanning/src/ingestion/pollRunner.ts:20-31
-  `createAiClient()` throws if `OPENAI_API_KEY` is missing, but `EmailIngestionService` treats the AI client as optional and already logs/marks monitors when it is absent. As written, any poll will crash in environments without OpenAI credentials (even if there are no AI-backed monitors), which prevents basic ingestion from running. Consider gating client creation on an opt-in env flag or returning `undefined` when AI is not configured.
+Residual operational risks:
 
-- [P2] Prevent double polling when RUN_POLL_ON_START is true — /media/nas/workspaces/EmailScanning/src/ingestion/pollRunner.ts:127-133
-  `pollRunner.ts` auto-invokes `runPoll()` on import when `RUN_POLL_ON_START=true`, but `ingestion/index.ts` also calls `runPoll()` unconditionally. Running `node dist/ingestion/index.js` with that env var set will execute the poll twice, causing duplicate ingestion and duplicate side effects. Consider removing the auto-run or gating it so the CLI entrypoint does not trigger it twice.
+- Gmail OAuth token refresh for mail account `id=1` currently returns `invalid_grant`, so ingestion reports account errors until token is refreshed.
+- Amazon/Manulife auto-link/create still requires `moneyrecovery_person_code` on active mail accounts to avoid `needs_review`.
 
 ## Handoff
-See HANDOFF.md for current state, progress, and next steps.
+See `HANDOFF.md` for current state and runbook.

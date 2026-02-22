@@ -1,5 +1,12 @@
 PROJECT PROMPT — SIGNAL ENGINE (EMAIL / SIGNAL INGESTION SERVICE)
 
+TRACKER PROGRESS FORMAT (MANDATORY)
+- Update root `PROGRESS.md` after meaningful work.
+- Keep `Last updated: YYYY-MM-DD` near the top.
+- Keep one primary `Status: ...` line near the top (`IN PROGRESS`, `BLOCKED`, or `COMPLETE`).
+- Keep immediate actions under `## NEXT` using markdown checkboxes.
+- Use `- [ ]` for pending and `- [x]` for completed items.
+
 This document is the authoritative, complete prompt for building the
 Signal Engine service. It supersedes partial prompts and updates.
 

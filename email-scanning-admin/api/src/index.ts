@@ -271,9 +271,22 @@ app.get('/api/events', async (req, res, next) => {
       return;
     }
 
+    const eventPrefixRaw = typeof req.query.event_prefix === 'string' ? req.query.event_prefix : '';
+    const eventPrefix = eventPrefixRaw.trim().toLowerCase();
+    const allowedPrefixes = ['amazon', 'manulife'] as const;
+    const prefixFilter = eventPrefix
+      ? (allowedPrefixes.includes(eventPrefix as (typeof allowedPrefixes)[number])
+          ? (eventPrefix as (typeof allowedPrefixes)[number])
+          : null)
+      : undefined;
+    if (prefixFilter === null) {
+      res.status(400).json({ error: 'Invalid event_prefix. Use amazon or manulife.' });
+      return;
+    }
+
     const limitRaw = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
     const limit = Number.isFinite(limitRaw) ? Math.trunc(limitRaw as number) : undefined;
-    const data = await listEvents({ status: statusFilter, limit });
+    const data = await listEvents({ status: statusFilter, eventTypePrefix: prefixFilter, limit });
     res.json({ data });
   } catch (err) {
     next(err);

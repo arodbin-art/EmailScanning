@@ -1,124 +1,168 @@
 # Operations
 
-## Poll scheduling (systemd)
-Install the unit files:
-```
-sudo cp ops/systemd/signal-engine-poll.service /etc/systemd/system/
-sudo cp ops/systemd/signal-engine-poll.timer /etc/systemd/system/
+## Autonomous schedule (systemd, every 15 minutes)
+Install the new unified service/timer (poll + delivery in one run):
+
+```bash
+sudo cp ops/systemd/email-scanning.service /etc/systemd/system/
+sudo cp ops/systemd/email-scanning.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now signal-engine-poll.timer
+sudo systemctl enable --now email-scanning.timer
 ```
 
-Adjust interval by editing `ops/systemd/signal-engine-poll.timer`.
+Check status/logs:
 
-## Azure Postgres firewall IP drift
-When your public IP changes, Azure Postgres firewall access can break. This repo includes an updater script:
-
-```
-ops/azure/update_pg_firewall_ip.sh
-```
-
-Default targets:
-- Resource group: `GiftTrackerRG`
-- Server: `gift-tracker-db-rod`
-- Rule: `allow-email-scanning-current`
-
-Cron (installed on NAS) runs every 10 minutes:
-
-```
-*/10 * * * * cd /media/nas/workspaces/EmailScanning && /media/nas/workspaces/EmailScanning/ops/azure/update_pg_firewall_ip.sh >> /media/nas/workspaces/EmailScanning/ops/logs/update_pg_firewall_ip.log 2>&1
+```bash
+systemctl status email-scanning.timer
+systemctl status email-scanning.service
+journalctl -u email-scanning.service -n 200 --no-pager
+tail -n 200 /media/nas/workspaces/EmailScanning/logs/email-scanning.log
 ```
 
-## Alerts
-Alert on log lines containing:
-- `Gmail auth error`
-- `Gmail quota error`
-- `account ingestion failed`
+Manual one-shot run:
 
-## AI optional gating
-Set `AI_ENABLED=true` to enable AI. When enabled, the OpenAI key is read from `secrets/OpenAI.key`.
-
-## MoneyRecovery (RVI) delivery
-This service writes detected signals to `events_outbox`. The delivery worker can translate Amazon events into MoneyRecovery API calls.
-
-Environment variables:
-- `RVI_BASE_URL` (example: `https://rvi-dev.proudmoss-21bb559c.canadacentral.azurecontainerapps.io`)
-- `RVI_BEARER_TOKEN` (MoneyRecovery JWT)
-- `RVI_DELIVERY_KIND=money_recovery`
-
-Run the worker:
+```bash
+npm run run:scheduled
 ```
-npm run deliver
+
+## Log rotation
+Install the included logrotate policy:
+
+```bash
+sudo cp ops/systemd/email-scanning.logrotate /etc/logrotate.d/email-scanning
+sudo logrotate -f /etc/logrotate.d/email-scanning
 ```
+
+## Ingestion AI controls (rules-first)
+Defaults are rules-only:
+
+- `AI_ENABLED=false`
+- `AMAZON_AI_ENABLED=false`
+- `MANULIFE_AI_ENABLED=false`
 
 Behavior:
-- Primary match: external reference `amazon_order_id` (source `signal-engine`)
-- Secondary match: `/rvi/returns/candidates` by merchant + amount
-- Fallback create: if no match and source mail account has `moneyrecovery_person_code`, auto-create RVI and attach external reference
-- No person code mapping: event status becomes `needs_review`
-- Transient auth/outage errors (401/403/404/429/5xx): event remains `pending` for retry
+- Missing AI credentials never blocks ingestion.
+- AI is optional and only used for near-miss suggestions.
 
-Backfill previously rejected no-candidate Amazon events:
-```
+## Delivery auth (unattended)
+Preferred: Entra client credentials for delivery worker.
+
+Required:
+- `RVI_BASE_URL`
+- `RVI_DELIVERY_KIND=money_recovery`
+
+Auth options:
+1. Static token:
+   - `RVI_AUTH_MODE=static`
+   - `RVI_BEARER_TOKEN=<jwt>`
+2. Client credentials (preferred):
+   - `RVI_AUTH_MODE=client_credentials`
+   - `RVI_AUTH_TENANT_ID`
+   - `RVI_AUTH_CLIENT_ID`
+   - `RVI_AUTH_CLIENT_SECRET`
+   - `RVI_AUTH_RESOURCE=api://<money-recovery-api-app-id>`
+
+Notes:
+- Delivery token minting uses OAuth client credentials (not Azure CLI tokens).
+- Worker auto-refreshes tokens before expiry.
+
+## Delivery behavior
+### Amazon
+- Events:
+  - `amazon.return_requested`
+  - `amazon.return_dropped_off`
+  - `amazon.refund_issued`
+- Association:
+  - external ref lookup: `source=email_scanning`, `ref_type=amazon_order_id`
+  - fallback candidate lookup: `/rvi/returns/candidates`
+  - auto-create return RVI when no match and mail account has `moneyrecovery_person_code`
+  - `moneyrecovery_person_code` must be a valid 3-letter MoneyRecovery person code (`ROD|PRI|CHA|YAS|ADR`)
+- No person code mapping:
+  - event status -> `needs_review` with `missing_person_code_mapping_for_mail_account`
+
+### Manulife
+- Events:
+  - `manulife.claim_received`
+  - `manulife.claim_processed`
+  - `manulife.claim_paid`
+  - `manulife.claim_denied`
+  - `manulife.claim_info_required`
+  - `manulife.claim_status_update`
+- Association:
+  - external ref lookup: `source=email_scanning`, `ref_type=manulife_claim_id`
+  - fallback candidate pass over `/rvi/urgent` by person/amount/date
+  - auto-create insurance RVI when safe and `moneyrecovery_person_code` exists
+- If claim status has no direct MoneyRecovery field (denied/info-required/status-update):
+  - event -> `needs_review` with extracted status/amounts in delivery log
+
+## Backfill command
+Reprocess older rejected Amazon no-candidate events:
+
+```bash
 npm run deliver:backfill:amazon
 ```
 
-## Amazon near-miss logging + AI fallback
-When an Amazon return/refund email fails deterministic parsing, the system records a near-miss row in `amazon_return_near_miss` for tuning.
+## Monitor templates (Admin Hub)
+In `Monitors`:
+- `Add Amazon Template`
+- `Add Manulife Template`
 
-Optional Azure OpenAI fallback (borrowed from Yasmine Marketplace):
-- `AMAZON_AI_ENABLED=true`
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_KEY`
-- `AZURE_OPENAI_DEPLOYMENT` (e.g. `yasmine-suggest`)
-- `AZURE_OPENAI_API_VERSION` (default `2024-02-15-preview`)
+In `Events`:
+- filter by status
+- filter by event family (`amazon` / `manulife`)
 
-Near-miss query:
-```
-select
-  nm.received_at,
-  nm.subject,
-  nm.order_id,
-  nm.expected_event_type,
-  nm.missing_fields,
-  nm.reason,
-  nm.ai_suggestion
-from amazon_return_near_miss nm
-order by nm.received_at desc;
+## Near-miss tables
+Amazon:
+
+```sql
+select received_at, subject, order_id, expected_event_type, missing_fields, reason, ai_suggestion
+from email_scanning.amazon_return_near_miss
+order by received_at desc;
 ```
 
-## Retention check
-Run log-only check:
-```
-npm run retention:check
+Manulife:
+
+```sql
+select received_at, subject, claim_id, status_text, parse_reason, extracted_candidates
+from email_scanning.manulife_claim_near_miss
+order by received_at desc;
 ```
 
-## Gmail filters
-Optional:
-- `GMAIL_LABEL_IDS=INBOX,UNREAD`
-- `GMAIL_QUERY=is:unread`
+## Verification checklist
+1. Poll once:
+   - `npm run poll -- --provider gmail --limit 20`
+2. Deliver once:
+   - `npm run deliver`
+3. Confirm outbox status split:
 
-## Container deployment note (Gmail tokens)
-For containerized deployments, you can supply the Gmail token store file via:
-- `GMAIL_TOKEN_STORE_B64` (base64 encoded `gmail_tokens.json`)
-- `GMAIL_TOKEN_STORE_PATH` (default `secrets/gmail_tokens.json`)
-
-## Find-only validation query
-```
-select
-  e.subject,
-  m.name,
-  mm.matched_fields
-from monitor_matches mm
-join emails_raw e on e.id = mm.email_id
-join monitors m on m.id = mm.monitor_id
-order by mm.matched_at desc;
+```sql
+select event_type, status, count(*) 
+from email_scanning.events_outbox
+group by event_type, status
+order by event_type, status;
 ```
 
-## Manual poll harness
+4. Confirm latest delivery logs:
+
+```sql
+select event_id, delivered_at, rvi_response
+from email_scanning.events_delivery_log
+order by delivered_at desc
+limit 50;
 ```
-node dist/ingestion/index.js --provider gmail --limit 20
+
+## Azure Postgres firewall drift
+Updater script:
+
+```bash
+ops/azure/update_pg_firewall_ip.sh
+```
+
+Existing cron:
+
+```bash
+*/10 * * * * cd /media/nas/workspaces/EmailScanning && /media/nas/workspaces/EmailScanning/ops/azure/update_pg_firewall_ip.sh >> /media/nas/workspaces/EmailScanning/ops/logs/update_pg_firewall_ip.log 2>&1
 ```
 
 ## Handoff
-See HANDOFF.md for current state, progress, and next steps.
+See `HANDOFF.md` for current deployment and auth notes.

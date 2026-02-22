@@ -1,5 +1,20 @@
 # signal-engine
 
+Last updated: 2026-02-22
+Status: IN PROGRESS
+
+## NEXT
+- [ ] 1. Configure/verify `moneyrecovery_person_code` on all active Amazon/Manulife mail accounts
+- [ ] 2. Refresh Gmail OAuth token for account `id=1` (`invalid_grant`) and re-run live ingestion
+- [x] 3. Autonomous ingest+delivery scheduler + Manulife integration completed
+
+## Tracker Format (Codex)
+Required file shape for tracker compatibility:
+- Keep `Last updated: YYYY-MM-DD` near the top.
+- Keep one primary `Status: ...` line near the top.
+- Keep immediate tasks under `## NEXT` using markdown checkboxes.
+- Use unchecked items for pending actions and checked items for completed actions.
+
 Start timestamp: 2026-01-30T03:03:17Z
 
 Objective: Build a standalone service that ingests external signals (email first), interprets them using rules and AI, and emits structured, auditable events to RVI without mutating business state.
@@ -27,6 +42,10 @@ Objective (Added): Detect Amazon refund discrepancies with deterministic parsing
 - [x] 16. Email Scanning Admin Hub (web UI for rules) (Added during execution)
 - [x] 17. Amazon return parsing enhancements + near-miss logging (Added during execution)
 - [x] 18. Azure dev deployment + scheduling (Added during execution)
+- [x] 19. Deterministic Amazon + Manulife event model + parser integration (Added during execution)
+- [x] 20. Delivery auth client-credentials token provider + Amazon/Manulife translator (Added during execution)
+- [x] 21. Unified 15-minute NAS scheduled cycle (poll + deliver) (Added during execution)
+- [x] 22. Admin monitor templates + event family filters (Added during execution)
 
 ## Task 1 — Completed
 Completed: 2026-01-30T03:18:48Z
@@ -243,6 +262,56 @@ Files:
 - package.json
 - package-lock.json
 Gmail is live:
+
+## Task 19 — Completed (Added during execution)
+Completed: 2026-02-22T09:00:00Z
+Summary:
+- Added deterministic Manulife parsing/events and near-miss table.
+- Standardized outbox payload contract for Amazon + Manulife.
+- Updated event dedupe to use provider + mail account + event type + primary ref + amount + date hash.
+Files:
+- `src/events/signalEvents.ts`
+- `src/automation/manulifeClaimParser.ts`
+- `src/automation/manulifeClaimParserTest.ts`
+- `src/automation/manulifeClaimReplay.ts`
+- `src/ingestion/emailIngestionService.ts`
+- `prisma/schema.prisma`
+- `prisma/migrations/20260222080000_manulife_claim_near_miss/migration.sql`
+
+## Task 20 — Completed (Added during execution)
+Completed: 2026-02-22T09:00:00Z
+Summary:
+- Delivery worker now handles Amazon + Manulife mapping/idempotency paths against MoneyRecovery.
+- Added unattended Entra client-credentials token provider (with v2->v1 fallback) for delivery auth.
+- External ref source normalized to `email_scanning` with backward-compat lookup.
+Files:
+- `src/delivery/moneyRecoveryClient.ts`
+- `src/delivery/authTokenProvider.ts`
+- `src/delivery/rviClient.ts`
+- `src/delivery/index.ts`
+- `src/delivery/backfillAmazonRejected.ts`
+- `src/delivery/moneyRecoveryClientTest.ts`
+
+## Task 21 — Completed (Added during execution)
+Completed: 2026-02-22T09:00:00Z
+Summary:
+- Added single-command scheduled cycle (`poll` then `deliver`) and systemd/logrotate artifacts for 15-minute unattended NAS operation.
+Files:
+- `src/ops/runScheduledCycle.ts`
+- `ops/systemd/email-scanning.service`
+- `ops/systemd/email-scanning.timer`
+- `ops/systemd/email-scanning.logrotate`
+
+## Task 22 — Completed (Added during execution)
+Completed: 2026-02-22T09:00:00Z
+Summary:
+- Added monitor template actions for Amazon and Manulife in Admin Hub.
+- Added outbox filtering by event family prefix in Admin API/UI.
+Files:
+- `email-scanning-admin/ui/src/pages/MonitorsPage.tsx`
+- `email-scanning-admin/ui/src/pages/EventsPage.tsx`
+- `email-scanning-admin/api/src/index.ts`
+- `email-scanning-admin/api/src/store.ts`
 - Credential label: rodleeallen
 - Date enabled: 2026-02-02
 - Verification steps: poll run, emails_raw count, blob path check, attachment blob check, idempotent re-run.
@@ -462,3 +531,15 @@ Progress: 2026-02-19T00:10:00Z
 Progress: 2026-02-19T00:12:00Z
 - Ran `npm run deliver:backfill:amazon` for previously rejected Amazon no-candidate events.
 - Selected 8 events and reset to pending, but delivery is currently blocked by MoneyRecovery 401 Unauthorized (token expired/invalid), so events remain pending for retry.
+
+Progress: 2026-02-22T20:20:00Z
+- Major release prep: bumped package version to `2.0.0`.
+- Confirmed MoneyRecovery person mapping must use valid 3-letter person codes (`ROD`, `PRI`, `CHA`, `YAS`, `ADR`), and set active mailbox mapping to `ROD`.
+- Re-ran Amazon delivery with mapping fixed:
+  - `amazon.refund_issued`: delivered (6)
+  - `amazon.return_requested`: delivered (1)
+  - `amazon.return_dropped_off`: needs_review (1)
+- Hardened delivery worker behavior:
+  - auto-create memo is truncated to 200 chars before POST `/rvi`
+  - return-flow readiness/artifact 400s are classified as `needs_review` (not `rejected`)
+- Tightened Admin Mail Account validation for `moneyrecovery_person_code` to exact 3-letter uppercase format.

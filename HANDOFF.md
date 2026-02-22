@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-19T00:12:00Z
+Last updated: 2026-02-22T09:10:00Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -22,6 +22,39 @@ Last updated: 2026-02-19T00:12:00Z
 - Amazon return replay tool available for dry-run or emission from stored emails.
 - Azure Postgres firewall now has rule `allow-email-scanning-current` for current public IP.
 - Cron job installed to auto-refresh Azure Postgres firewall IP every 10 minutes.
+- Manulife claims parser added with deterministic event emission and near-miss capture (`manulife_claim_near_miss`).
+- Event payloads are now standardized with deterministic dedupe keys based on provider + mail account + event type + primary reference + amount + date.
+- Delivery now supports both Amazon and Manulife event families.
+- Delivery auth supports unattended Entra client-credentials token minting (`RVI_AUTH_MODE=client_credentials`) with v2->v1 fallback.
+- External reference source normalized to `email_scanning` (with backward lookup fallback for `signal-engine`).
+- Added unified NAS scheduled runner (`npm run run:scheduled`) with systemd units:
+  - `ops/systemd/email-scanning.service`
+  - `ops/systemd/email-scanning.timer`
+  - `ops/systemd/email-scanning.logrotate`
+- Systemd timer `email-scanning.timer` is installed and active (15-minute cadence).
+- Legacy `signal-engine-poll.timer` disabled to avoid duplicate poll runs.
+- Current ingestion blocker on NAS: Gmail OAuth refresh returns `invalid_grant` for mail account `id=1`; delivery still runs.
+- Admin UI now includes monitor template buttons (Amazon + Manulife) and event family filters on `/admin/events`.
+
+## 2026-02-22 integration update
+- Amazon ingestion keeps deterministic rules parsing and emits:
+  - `amazon.return_requested`
+  - `amazon.return_dropped_off`
+  - `amazon.refund_issued`
+- Manulife ingestion emits:
+  - `manulife.claim_received`
+  - `manulife.claim_processed`
+  - `manulife.claim_paid`
+  - `manulife.claim_denied`
+  - `manulife.claim_info_required`
+  - `manulife.claim_status_update`
+- Delivery behavior:
+  - Amazon: lookup by `amazon_order_id` external ref -> candidates -> auto-create return RVI when `moneyrecovery_person_code` is set.
+  - Manulife: lookup by `manulife_claim_id` external ref -> urgent-list candidate pass -> auto-create insurance RVI when safe and person mapping exists.
+  - Missing mail-account person mapping: event becomes `needs_review` (not `rejected`).
+  - Unmappable Manulife status states (`denied/info_required/status_update`) are routed to `needs_review` with extracted context.
+- Backfill command remains:
+  - `npm run deliver:backfill:amazon`
 
 ## Running services on NAS
 - Admin UI dev server: http://nas:5175
@@ -99,12 +132,19 @@ Last updated: 2026-02-19T00:12:00Z
 - For `amazon.refund_issued`, marks return flow refunded (uses email received timestamp as `refunded_at`).
 - Auto-create is now allowed via explicit per-mail-account person code mapping.
 
+## Latest status (2026-02-22)
+- Auto-RVI creation is working with valid mailbox mapping (`moneyrecovery_person_code=ROD`).
+- Amazon delivery status snapshot:
+  - `amazon.refund_issued`: delivered (6)
+  - `amazon.return_requested`: delivered (1)
+  - `amazon.return_dropped_off`: needs_review (1, return flow not ready)
+- Admin validation now enforces `moneyrecovery_person_code` as exact 3-letter uppercase code.
+
 ## Next steps
-- Set/verify `moneyrecovery_person_code` for all Amazon mail accounts in Admin Hub (`/admin/mail-accounts`).
-- Refresh `RVI_BEARER_TOKEN` (current runs are 401 Unauthorized), then run:
-- `npm run deliver`
-- `npm run deliver:backfill:amazon`
-- Verify Events page (`/admin/events`) shows `delivered` or `needs_review` instead of stuck `pending`.
+- Keep mail account person mapping set to a valid code (`ROD|PRI|CHA|YAS|ADR`) in Admin Hub (`/admin/mail-accounts`).
+- For the remaining dropped-off event in `needs_review`, resolve return-flow readiness in MoneyRecovery and re-run:
+  - `npm run deliver`
+- Verify Events page (`/admin/events`) stays in `delivered`/`needs_review` and no new `rejected` rows appear for person-code issues.
 
 ## Notes
 - Database schema is email_scanning in the signal_engine database.

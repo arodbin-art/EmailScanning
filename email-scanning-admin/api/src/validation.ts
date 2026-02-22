@@ -9,7 +9,7 @@ export const mailAccountInputSchema = z.object({
   moneyrecovery_person_code: z
     .string()
     .trim()
-    .regex(/^[A-Z0-9][A-Z0-9_-]{1,31}$/)
+    .regex(/^[A-Z]{3}$/)
     .optional()
     .nullable(),
   enabled: z.boolean().optional(),

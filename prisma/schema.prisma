@@ -64,6 +64,7 @@ model EmailRaw {
   amazonRefundProcessed AmazonRefundProcessed[]
   amazonRefundDiscrepancies AmazonRefundDiscrepancy[]
   amazonReturnNearMiss AmazonReturnNearMiss?
+  manulifeClaimNearMiss ManulifeClaimNearMiss?
 
   @@unique([mailAccountId, messageId])
   @@map("emails_raw")
@@ -203,4 +204,22 @@ model AmazonReturnNearMiss {
   email            EmailRaw @relation(fields: [emailId], references: [id])
 
   @@map("amazon_return_near_miss")
+}
+
+model ManulifeClaimNearMiss {
+  emailId             Int      @id @map("email_id")
+  provider            String   @db.VarChar(50)
+  fromAddress         String   @map("from_address") @db.Text
+  subject             String?  @db.Text
+  receivedAt          DateTime @map("received_at") @db.Timestamp(6)
+  claimId             String?  @map("claim_id") @db.Text
+  statusText          String?  @map("status_text") @db.Text
+  parseReason         String   @map("parse_reason") @db.VarChar(120)
+  extractedCandidates Json?    @map("extracted_candidates")
+  aiSuggestionJson    Json?    @map("ai_suggestion_json")
+  snippet             String?  @db.Text
+  createdAt           DateTime @map("created_at") @db.Timestamp(6)
+  email               EmailRaw @relation(fields: [emailId], references: [id])
+
+  @@map("manulife_claim_near_miss")
 }

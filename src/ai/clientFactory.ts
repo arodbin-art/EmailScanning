@@ -15,7 +15,8 @@ export async function createAiClient(): Promise<AiClient | undefined> {
 
   const apiKey = await readApiKeyFromFile()
   if (!apiKey) {
-    throw new Error("OpenAI API key not found at secrets/OpenAI.key")
+    console.warn("AI_ENABLED=true but OpenAI key is missing; continuing in rules-only mode")
+    return undefined
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini"

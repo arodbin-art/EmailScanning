@@ -1,22 +1,25 @@
 import "dotenv/config"
-import { runPoll } from "./pollRunner.js"
+import { pathToFileURL } from "url"
+import { PollOptions, runPoll } from "./pollRunner.js"
 
-const args = process.argv.slice(2)
-const providerFlag = readArg(args, "--provider")
-const limitFlag = readArg(args, "--limit")
-const limit = limitFlag ? Number(limitFlag) : undefined
+export function parsePollArgs(args: string[]): PollOptions {
+  const providerFlag = readArg(args, "--provider")
+  const limitFlag = readArg(args, "--limit")
+  const limit = limitFlag ? Number(limitFlag) : undefined
 
-runPoll({
-  providerFilter: providerFlag ?? undefined,
-  limit: Number.isFinite(limit) ? limit : undefined,
-})
-  .then(() => {
-    process.exit(0)
-  })
-  .catch((error) => {
-    console.error("poll failed", error)
-    process.exit(1)
-  })
+  return {
+    providerFilter: providerFlag ?? undefined,
+    limit: Number.isFinite(limit) ? limit : undefined,
+  }
+}
+
+export async function runPollFromCli(
+  args: string[],
+  runPollImpl: (options: PollOptions) => Promise<void> = runPoll
+): Promise<void> {
+  const options = parsePollArgs(args)
+  await runPollImpl(options)
+}
 
 function readArg(args: string[], name: string): string | null {
   const index = args.indexOf(name)
@@ -25,4 +28,19 @@ function readArg(args: string[], name: string): string | null {
   }
   const value = args[index + 1]
   return value ?? null
+}
+
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (isDirectRun) {
+  runPollFromCli(process.argv.slice(2))
+    .then(() => {
+      process.exit(0)
+    })
+    .catch((error) => {
+      console.error("poll failed", error)
+      process.exit(1)
+    })
 }

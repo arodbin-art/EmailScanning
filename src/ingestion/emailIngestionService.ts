@@ -9,11 +9,20 @@ import { AiClient } from "../ai/types.js"
 import crypto from "crypto"
 import { detectAmazonRefundDiscrepancy } from "../automation/amazonRefundDetector.js"
 import {
-  buildAmazonReturnDedupeKey,
   detectAmazonReturnNearMiss,
   parseAmazonReturnEmail,
 } from "../automation/amazonReturnParser.js"
 import { amazonAiEnabled, classifyAmazonEmailWithAi } from "../automation/amazonReturnAi.js"
+import {
+  detectManulifeClaimNearMiss,
+  isStrongManulifeSender,
+  parseManulifeClaimEmail,
+} from "../automation/manulifeClaimParser.js"
+import {
+  AMAZON_EVENT_TYPES,
+  MANULIFE_EVENT_TYPES,
+  buildSignalEventDedupeKey,
+} from "../events/signalEvents.js"
 
 export type IngestionOptions = {
   maxMessagesPerPoll: number
@@ -212,7 +221,7 @@ export class EmailIngestionService {
       })
     }
 
-    await this.emitAmazonReturnEvent({
+    await this.emitDeterministicSignalEvent({
       emailId: createdEmail.id,
       mailAccountId: account.id,
       provider: provider.provider,
@@ -421,13 +430,27 @@ export class EmailIngestionService {
     }
   }
 
-  private async emitAmazonReturnEvent(params: {
+  private async emitDeterministicSignalEvent(params: {
     emailId: number
     mailAccountId: number
     provider: string
     message: ProviderMessage
     normalizedBody: string
   }): Promise<void> {
+    const amazonEmitted = await this.emitAmazonReturnEvent(params)
+    if (amazonEmitted) {
+      return
+    }
+    await this.emitManulifeClaimEvent(params)
+  }
+
+  private async emitAmazonReturnEvent(params: {
+    emailId: number
+    mailAccountId: number
+    provider: string
+    message: ProviderMessage
+    normalizedBody: string
+  }): Promise<boolean> {
     const parsed = parseAmazonReturnEmail({
       provider: params.provider,
       fromAddress: params.message.fromAddress,
@@ -443,61 +466,202 @@ export class EmailIngestionService {
         message: params.message,
         normalizedBody: params.normalizedBody,
       })
-      return
+      return false
     }
 
     await this.db.amazonReturnNearMiss
       .delete({ where: { emailId: params.emailId } })
       .catch(() => undefined)
 
-    const dedupeKey = buildAmazonReturnDedupeKey(
-      params.provider,
-      parsed.orderId,
-      parsed.eventType
-    )
+    const returnRef = extractAmazonReturnReference(params.normalizedBody)
+    const amountTotal =
+      parsed.eventType === AMAZON_EVENT_TYPES.RETURN_REQUESTED
+        ? parsed.amountTotal
+        : parsed.eventType === AMAZON_EVENT_TYPES.REFUND_ISSUED
+        ? parsed.refundAmount
+        : parsed.estimatedRefund
+    const deadlineDate =
+      parsed.eventType === AMAZON_EVENT_TYPES.RETURN_REQUESTED ? parsed.dropOffBy : undefined
 
-    const payload: Record<string, unknown> = {
-      order_id: parsed.orderId,
-      item_title: parsed.itemTitle,
-      email: {
-        email_id: params.emailId,
-        mail_account_id: params.mailAccountId,
-        message_id: params.message.messageId,
-        from: params.message.fromAddress,
-        subject: params.message.subject,
-        received_at: params.message.receivedAt.toISOString(),
+    const payload = this.buildCommonSignalPayload({
+      provider: params.provider,
+      mailAccountId: params.mailAccountId,
+      sourceEmailId: params.emailId,
+      message: params.message,
+      confidence: 1,
+      base: {
+        order_id: parsed.orderId,
+        return_id: returnRef.returnId ?? null,
+        return_code: returnRef.returnCode ?? null,
+        amount_total: amountTotal,
+        currency: "CAD",
+        deadline_date: deadlineDate ?? null,
+        label_link_present: detectAmazonLabelLink(params.normalizedBody),
+        status_text: summarizeAmazonStatusText(parsed.eventType, params.message.subject),
+        item_title: parsed.itemTitle,
       },
-    }
+    })
 
-    if (parsed.eventType === "amazon.return_requested") {
+    if (parsed.eventType === AMAZON_EVENT_TYPES.RETURN_REQUESTED) {
       payload.amount_total = parsed.amountTotal
       payload.amount = parsed.amountTotal
       payload.drop_off_by = parsed.dropOffBy
       if (parsed.paymentMethodLast4) {
         payload.payment_method_last4 = parsed.paymentMethodLast4
       }
-    } else if (parsed.eventType === "amazon.refund_issued") {
+    } else if (parsed.eventType === AMAZON_EVENT_TYPES.REFUND_ISSUED) {
       payload.refund_amount = parsed.refundAmount
-    } else if (parsed.eventType === "amazon.return_dropped_off") {
+    } else if (parsed.eventType === AMAZON_EVENT_TYPES.RETURN_DROPPED_OFF) {
       payload.estimated_refund = parsed.estimatedRefund
       if (parsed.refundBy) {
         payload.refund_by = parsed.refundBy
       }
     }
 
-    await this.db.eventsOutbox.upsert({
-      where: { dedupeKey },
-      update: {},
-      create: {
-        dedupeKey,
-        eventType: parsed.eventType,
-        payloadJson: payload as any,
-        sourceEmailId: params.emailId,
-        confidence: 1.0,
-        status: "pending",
-        createdAt: new Date(),
+    const dedupeKey = buildSignalEventDedupeKey({
+      provider: params.provider,
+      mailAccountId: params.mailAccountId,
+      eventType: parsed.eventType,
+      primaryRef: parsed.orderId,
+      primaryAmount: amountTotal,
+      primaryDate: deadlineDate ?? params.message.receivedAt.toISOString().slice(0, 10),
+    })
+
+    await this.createOutboxEvent({
+      dedupeKey,
+      eventType: parsed.eventType,
+      payload,
+      sourceEmailId: params.emailId,
+      confidence: 1,
+    })
+    return true
+  }
+
+  private async emitManulifeClaimEvent(params: {
+    emailId: number
+    mailAccountId: number
+    provider: string
+    message: ProviderMessage
+    normalizedBody: string
+  }): Promise<boolean> {
+    const parsed = parseManulifeClaimEmail({
+      provider: params.provider,
+      fromAddress: params.message.fromAddress,
+      subject: params.message.subject ?? undefined,
+      receivedAt: params.message.receivedAt,
+      normalizedBody: params.normalizedBody,
+    })
+
+    if (!parsed) {
+      await this.recordManulifeClaimNearMiss({
+        emailId: params.emailId,
+        provider: params.provider,
+        message: params.message,
+        normalizedBody: params.normalizedBody,
+      })
+      return false
+    }
+
+    await this.db.manulifeClaimNearMiss
+      .delete({ where: { emailId: params.emailId } })
+      .catch(() => undefined)
+
+    const payload = this.buildCommonSignalPayload({
+      provider: params.provider,
+      mailAccountId: params.mailAccountId,
+      sourceEmailId: params.emailId,
+      message: params.message,
+      confidence: parsed.claimId ? 0.99 : 0.9,
+      base: {
+        insurer: "Manulife",
+        claim_id: parsed.claimId ?? null,
+        status_text: parsed.statusText,
+        amounts: {
+          amount_claimed: parsed.amounts.amountClaimed ?? null,
+          amount_eligible: parsed.amounts.amountEligible ?? null,
+          amount_paid: parsed.amounts.amountPaid ?? null,
+        },
+        dates: {
+          processed_at: parsed.dates.processedAt ?? null,
+          paid_at: parsed.dates.paidAt ?? null,
+        },
       },
     })
+
+    const fallbackNearMiss = detectManulifeClaimNearMiss({
+      provider: params.provider,
+      fromAddress: params.message.fromAddress,
+      subject: params.message.subject ?? undefined,
+      receivedAt: params.message.receivedAt,
+      normalizedBody: params.normalizedBody,
+    })
+    if (
+      parsed.eventType === MANULIFE_EVENT_TYPES.CLAIM_STATUS_UPDATE &&
+      !parsed.claimId &&
+      fallbackNearMiss
+    ) {
+      await this.db.manulifeClaimNearMiss.upsert({
+        where: { emailId: params.emailId },
+        update: {
+          claimId: null,
+          statusText: fallbackNearMiss.statusText ?? parsed.statusText,
+          parseReason: fallbackNearMiss.parseReason,
+          extractedCandidates: {
+            claim_candidates: fallbackNearMiss.claimCandidates,
+            amounts: fallbackNearMiss.amounts ?? null,
+          } as any,
+          aiSuggestionJson: Prisma.JsonNull,
+          snippet: params.normalizedBody.slice(0, 1200),
+          createdAt: new Date(),
+        },
+        create: {
+          emailId: params.emailId,
+          provider: params.provider,
+          fromAddress: params.message.fromAddress,
+          subject: params.message.subject ?? null,
+          receivedAt: params.message.receivedAt,
+          claimId: null,
+          statusText: fallbackNearMiss.statusText ?? parsed.statusText,
+          parseReason: fallbackNearMiss.parseReason,
+          extractedCandidates: {
+            claim_candidates: fallbackNearMiss.claimCandidates,
+            amounts: fallbackNearMiss.amounts ?? null,
+          } as any,
+          aiSuggestionJson: Prisma.JsonNull,
+          snippet: params.normalizedBody.slice(0, 1200),
+          createdAt: new Date(),
+        },
+      })
+    }
+
+    const primaryRef =
+      parsed.claimId ??
+      `${params.provider}:${params.mailAccountId}:${params.message.messageId}`
+    const primaryAmount =
+      parsed.amounts.amountPaid ??
+      parsed.amounts.amountEligible ??
+      parsed.amounts.amountClaimed
+    const primaryDate =
+      parsed.dates.paidAt ??
+      parsed.dates.processedAt ??
+      params.message.receivedAt.toISOString().slice(0, 10)
+    const dedupeKey = buildSignalEventDedupeKey({
+      provider: params.provider,
+      mailAccountId: params.mailAccountId,
+      eventType: parsed.eventType,
+      primaryRef,
+      primaryAmount,
+      primaryDate,
+    })
+
+    await this.createOutboxEvent({
+      dedupeKey,
+      eventType: parsed.eventType,
+      payload,
+      sourceEmailId: params.emailId,
+      confidence: parsed.claimId ? 0.99 : 0.9,
+    })
+    return true
   }
 
   private async recordAmazonReturnNearMiss(params: {
@@ -574,19 +738,120 @@ export class EmailIngestionService {
       missing_fields: nearMiss.missingFields,
     })
   }
-}
 
-function summarizeAttachments(message: ProviderMessage): string {
-  if (!message.attachments || message.attachments.length === 0) {
-    return "None"
-  }
-  return message.attachments
-    .map((attachment) => {
-      const size = attachment.size ? ` (${attachment.size} bytes)` : ""
-      const type = attachment.contentType ? ` [${attachment.contentType}]` : ""
-      return `${attachment.name}${type}${size}`
+  private async recordManulifeClaimNearMiss(params: {
+    emailId: number
+    provider: string
+    message: ProviderMessage
+    normalizedBody: string
+  }): Promise<void> {
+    if (!isStrongManulifeSender(params.message.fromAddress)) {
+      return
+    }
+
+    const nearMiss = detectManulifeClaimNearMiss({
+      provider: params.provider,
+      fromAddress: params.message.fromAddress,
+      subject: params.message.subject ?? undefined,
+      receivedAt: params.message.receivedAt,
+      normalizedBody: params.normalizedBody,
     })
-    .join(", ")
+    if (!nearMiss) {
+      return
+    }
+
+    await this.db.manulifeClaimNearMiss.upsert({
+      where: { emailId: params.emailId },
+      update: {
+        claimId: nearMiss.claimCandidates.length === 1 ? nearMiss.claimCandidates[0] : null,
+        statusText: nearMiss.statusText ?? null,
+        parseReason: nearMiss.parseReason,
+        extractedCandidates: {
+          claim_candidates: nearMiss.claimCandidates,
+          amounts: nearMiss.amounts ?? null,
+        } as any,
+        aiSuggestionJson: Prisma.JsonNull,
+        snippet: params.normalizedBody.slice(0, 1200),
+        createdAt: new Date(),
+      },
+      create: {
+        emailId: params.emailId,
+        provider: params.provider,
+        fromAddress: params.message.fromAddress,
+        subject: params.message.subject ?? null,
+        receivedAt: params.message.receivedAt,
+        claimId: nearMiss.claimCandidates.length === 1 ? nearMiss.claimCandidates[0] : null,
+        statusText: nearMiss.statusText ?? null,
+        parseReason: nearMiss.parseReason,
+        extractedCandidates: {
+          claim_candidates: nearMiss.claimCandidates,
+          amounts: nearMiss.amounts ?? null,
+        } as any,
+        aiSuggestionJson: Prisma.JsonNull,
+        snippet: params.normalizedBody.slice(0, 1200),
+        createdAt: new Date(),
+      },
+    })
+
+    this.logger.warn("manulife_claim_near_miss", {
+      email_id: params.emailId,
+      parse_reason: nearMiss.parseReason,
+      claim_candidates: nearMiss.claimCandidates,
+      status_text: nearMiss.statusText,
+    })
+  }
+
+  private buildCommonSignalPayload(params: {
+    provider: string
+    mailAccountId: number
+    sourceEmailId: number
+    message: ProviderMessage
+    confidence: number
+    base: Record<string, unknown>
+  }): Record<string, unknown> {
+    return {
+      provider: params.provider,
+      mail_account_id: params.mailAccountId,
+      received_at: params.message.receivedAt.toISOString(),
+      from_address: params.message.fromAddress,
+      subject: params.message.subject ?? null,
+      provider_message_id: params.message.messageId,
+      thread_id: params.message.threadId ?? null,
+      source_email_id: params.sourceEmailId,
+      confidence: params.confidence,
+      email: {
+        email_id: params.sourceEmailId,
+        mail_account_id: params.mailAccountId,
+        message_id: params.message.messageId,
+        from: params.message.fromAddress,
+        subject: params.message.subject,
+        received_at: params.message.receivedAt.toISOString(),
+      },
+      ...params.base,
+    }
+  }
+
+  private async createOutboxEvent(params: {
+    dedupeKey: string
+    eventType: string
+    payload: Record<string, unknown>
+    sourceEmailId: number
+    confidence: number
+  }): Promise<void> {
+    await this.db.eventsOutbox.upsert({
+      where: { dedupeKey: params.dedupeKey },
+      update: {},
+      create: {
+        dedupeKey: params.dedupeKey,
+        eventType: params.eventType,
+        payloadJson: params.payload as any,
+        sourceEmailId: params.sourceEmailId,
+        confidence: params.confidence,
+        status: "pending",
+        createdAt: new Date(),
+      },
+    })
+  }
 }
 
 type EmitEventParams = {
@@ -608,4 +873,41 @@ function computeDedupeKey(emailId: number, monitorId: string, eventType: string)
     .createHash("md5")
     .update(`${emailId}:${monitorId}:${eventType}`)
     .digest("hex")
+}
+
+function extractAmazonReturnReference(normalizedBody: string): {
+  returnId?: string
+  returnCode?: string
+} {
+  const returnId =
+    normalizedBody.match(
+      /\breturn(?:\s*(?:id|number|authorization))\s*[:#-]?\s*([A-Z0-9-]{6,})/i
+    )?.[1] ?? undefined
+  const returnCode =
+    normalizedBody.match(
+      /\b(?:drop[-\s]*off|return)\s*(?:code|qr code)\s*[:#-]?\s*([A-Z0-9-]{4,})/i
+    )?.[1] ?? undefined
+  return { returnId, returnCode }
+}
+
+function detectAmazonLabelLink(normalizedBody: string): boolean {
+  return /\b(return label|print label|qr code|drop[-\s]*off code|label)\b/i.test(
+    normalizedBody
+  )
+}
+
+function summarizeAmazonStatusText(eventType: string, subject?: string | null): string {
+  if (subject && subject.trim().length > 0) {
+    return subject.trim()
+  }
+  if (eventType === AMAZON_EVENT_TYPES.RETURN_REQUESTED) {
+    return "return request confirmed"
+  }
+  if (eventType === AMAZON_EVENT_TYPES.RETURN_DROPPED_OFF) {
+    return "return dropped off"
+  }
+  if (eventType === AMAZON_EVENT_TYPES.REFUND_ISSUED) {
+    return "refund issued"
+  }
+  return "status update"
 }

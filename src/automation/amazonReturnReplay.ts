@@ -3,9 +3,9 @@ import { prisma } from "../db/prisma.js"
 import { createObjectStorage, resolveStorageProvider } from "../storage/index.js"
 import {
   AmazonReturnParseResult,
-  buildAmazonReturnDedupeKey,
   parseAmazonReturnEmail,
 } from "./amazonReturnParser.js"
+import { buildSignalEventDedupeKey } from "../events/signalEvents.js"
 
 const DEFAULT_SINCE_DAYS = 14
 const DEFAULT_LIMIT = 50
@@ -23,10 +23,12 @@ type ReplayOptions = {
 type EmailRow = {
   id: number
   provider: string
+  mailAccountId: number
   fromAddress: string
   subject: string | null
   receivedAt: Date
   messageId: string
+  threadId: string | null
   bodyObjectKey: string
 }
 
@@ -81,12 +83,39 @@ function parseArgs(): ReplayOptions {
   return options
 }
 
-function buildPayload(email: EmailRow, parsed: AmazonReturnParseResult): Record<string, unknown> {
+function buildPayload(
+  email: EmailRow,
+  parsed: AmazonReturnParseResult,
+  normalizedBody: string
+): Record<string, unknown> {
+  const amountTotal =
+    parsed.eventType === "amazon.return_requested"
+      ? parsed.amountTotal
+      : parsed.eventType === "amazon.refund_issued"
+      ? parsed.refundAmount
+      : parsed.estimatedRefund
   const payload: Record<string, unknown> = {
+    provider: email.provider,
+    mail_account_id: email.mailAccountId,
+    received_at: email.receivedAt.toISOString(),
+    from_address: email.fromAddress,
+    subject: email.subject ?? null,
+    provider_message_id: email.messageId,
+    thread_id: email.threadId,
+    source_email_id: email.id,
+    confidence: 1,
     order_id: parsed.orderId,
+    amount_total: amountTotal,
+    currency: "CAD",
+    deadline_date: parsed.eventType === "amazon.return_requested" ? parsed.dropOffBy : null,
+    label_link_present: /return label|qr code|drop[-\s]*off code|print label/i.test(
+      normalizedBody
+    ),
+    status_text: email.subject ?? parsed.eventType,
     item_title: parsed.itemTitle,
     email: {
       email_id: email.id,
+      mail_account_id: email.mailAccountId,
       message_id: email.messageId,
       from: email.fromAddress,
       subject: email.subject,
@@ -132,10 +161,12 @@ async function main(): Promise<void> {
     select: {
       id: true,
       provider: true,
+      mailAccountId: true,
       fromAddress: true,
       subject: true,
       receivedAt: true,
       messageId: true,
+      threadId: true,
       bodyObjectKey: true,
     },
   })
@@ -175,11 +206,24 @@ async function main(): Promise<void> {
         continue
       }
 
-      const dedupeKey = buildAmazonReturnDedupeKey(
-        email.provider,
-        parsed.orderId,
-        parsed.eventType
-      )
+      const amountTotal =
+        parsed.eventType === "amazon.return_requested"
+          ? parsed.amountTotal
+          : parsed.eventType === "amazon.refund_issued"
+          ? parsed.refundAmount
+          : parsed.estimatedRefund
+      const primaryDate =
+        parsed.eventType === "amazon.return_requested"
+          ? parsed.dropOffBy
+          : email.receivedAt.toISOString().slice(0, 10)
+      const dedupeKey = buildSignalEventDedupeKey({
+        provider: email.provider,
+        mailAccountId: email.mailAccountId,
+        eventType: parsed.eventType,
+        primaryRef: parsed.orderId,
+        primaryAmount: amountTotal,
+        primaryDate,
+      })
 
       await prisma.eventsOutbox.upsert({
         where: { dedupeKey },
@@ -187,7 +231,7 @@ async function main(): Promise<void> {
         create: {
           dedupeKey,
           eventType: parsed.eventType,
-          payloadJson: buildPayload(email, parsed) as any,
+          payloadJson: buildPayload(email, parsed, normalizedBody) as any,
           sourceEmailId: email.id,
           confidence: 1.0,
           status: "pending",

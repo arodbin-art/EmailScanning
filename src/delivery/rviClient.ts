@@ -3,11 +3,18 @@ import { DeliveryClient, DeliveryResult, OutboxDeliveryInput } from "./types.js"
 export class RviClient implements DeliveryClient {
   private readonly baseUrl: string
   private readonly bearerToken?: string
+  private readonly tokenProvider?: () => Promise<string | undefined>
   private readonly timeoutMs: number
 
-  constructor(params: { baseUrl: string; bearerToken?: string; timeoutMs?: number }) {
+  constructor(params: {
+    baseUrl: string
+    bearerToken?: string
+    timeoutMs?: number
+    tokenProvider?: () => Promise<string | undefined>
+  }) {
     this.baseUrl = params.baseUrl.replace(/\/$/, "")
     this.bearerToken = params.bearerToken
+    this.tokenProvider = params.tokenProvider
     this.timeoutMs = params.timeoutMs ?? 10000
   }
 
@@ -18,12 +25,13 @@ export class RviClient implements DeliveryClient {
   }
 
   async deliverEvent(payload: Record<string, unknown>): Promise<DeliveryResult> {
+    const headers = await this.buildHeaders()
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
     try {
       const response = await fetch(`${this.baseUrl}/events`, {
         method: "POST",
-        headers: this.buildHeaders(),
+        headers,
         body: JSON.stringify(payload),
         signal: controller.signal,
       })
@@ -41,12 +49,14 @@ export class RviClient implements DeliveryClient {
     }
   }
 
-  private buildHeaders(): Record<string, string> {
+  private async buildHeaders(): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     }
-    if (this.bearerToken) {
-      headers.Authorization = `Bearer ${this.bearerToken}`
+    const dynamicToken = this.tokenProvider ? await this.tokenProvider() : undefined
+    const token = dynamicToken ?? this.bearerToken
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
     }
     return headers
   }

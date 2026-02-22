@@ -3,6 +3,7 @@ import { prisma } from "../db/prisma.js"
 import { DeliveryWorker } from "./deliveryWorker.js"
 import { MoneyRecoveryClient } from "./moneyRecoveryClient.js"
 import { RviClient } from "./rviClient.js"
+import { createDeliveryTokenProviderFromEnv } from "./authTokenProvider.js"
 
 async function main() {
   const baseUrl = process.env.RVI_BASE_URL
@@ -11,12 +12,13 @@ async function main() {
   }
   const bearerToken = process.env.RVI_BEARER_TOKEN
   const timeoutMs = process.env.RVI_TIMEOUT_MS ? Number(process.env.RVI_TIMEOUT_MS) : undefined
+  const tokenProvider = createDeliveryTokenProviderFromEnv()
 
   const kind = (process.env.RVI_DELIVERY_KIND ?? "generic").toLowerCase()
   const client =
     kind === "money_recovery"
-      ? new MoneyRecoveryClient({ baseUrl, bearerToken, timeoutMs })
-      : new RviClient({ baseUrl, bearerToken, timeoutMs })
+      ? new MoneyRecoveryClient({ baseUrl, bearerToken, timeoutMs, tokenProvider })
+      : new RviClient({ baseUrl, bearerToken, timeoutMs, tokenProvider })
 
   const rows = (await prisma.$queryRawUnsafe(`
     SELECT DISTINCT eo.id
