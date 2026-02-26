@@ -90,10 +90,23 @@ function buildPayload(
 ): Record<string, unknown> {
   const amountTotal =
     parsed.eventType === "amazon.return_requested"
-      ? parsed.amountTotal
+      ? parsed.refundTotalEstimated
       : parsed.eventType === "amazon.refund_issued"
-      ? parsed.refundAmount
-      : parsed.estimatedRefund
+      ? parsed.refundAmountIssued
+      : parsed.refundTotalEstimated
+  const items = parsed.items.map((item) => ({
+    title: item.title,
+    qty: item.qty ?? null,
+  }))
+  const amazonBase: Record<string, unknown> = {
+    order_id: parsed.orderId,
+    currency: "CAD",
+    refund_destination_text: parsed.refundDestinationText ?? null,
+    status_text: parsed.statusText,
+  }
+  if (items.length > 0) {
+    amazonBase.items = items
+  }
   const payload: Record<string, unknown> = {
     provider: email.provider,
     mail_account_id: email.mailAccountId,
@@ -107,12 +120,14 @@ function buildPayload(
     order_id: parsed.orderId,
     amount_total: amountTotal,
     currency: "CAD",
-    deadline_date: parsed.eventType === "amazon.return_requested" ? parsed.dropOffBy : null,
+    deadline_date:
+      parsed.eventType === "amazon.return_requested" ? parsed.dropOffBy ?? null : null,
     label_link_present: /return label|qr code|drop[-\s]*off code|print label/i.test(
       normalizedBody
     ),
-    status_text: email.subject ?? parsed.eventType,
-    item_title: parsed.itemTitle,
+    status_text: parsed.statusText || email.subject || parsed.eventType,
+    item_title: parsed.items[0]?.title ?? null,
+    amazon: amazonBase,
     email: {
       email_id: email.id,
       mail_account_id: email.mailAccountId,
@@ -124,19 +139,23 @@ function buildPayload(
   }
 
   if (parsed.eventType === "amazon.return_requested") {
-    payload.amount_total = parsed.amountTotal
-    payload.amount = parsed.amountTotal
+    payload.amount_total = parsed.refundTotalEstimated
+    payload.amount = parsed.refundTotalEstimated
     payload.drop_off_by = parsed.dropOffBy
+    ;(payload.amazon as Record<string, unknown>).refund_total_estimated = parsed.refundTotalEstimated
+    ;(payload.amazon as Record<string, unknown>).dropoff_deadline_date = parsed.dropOffBy
+    ;(payload.amazon as Record<string, unknown>).return_method_location =
+      parsed.returnMethodOrLocation ?? null
     if (parsed.paymentMethodLast4) {
       payload.payment_method_last4 = parsed.paymentMethodLast4
+      ;(payload.amazon as Record<string, unknown>).payment_method_last4 = parsed.paymentMethodLast4
     }
   } else if (parsed.eventType === "amazon.refund_issued") {
-    payload.refund_amount = parsed.refundAmount
+    payload.refund_amount = parsed.refundAmountIssued
+    ;(payload.amazon as Record<string, unknown>).refund_amount_issued = parsed.refundAmountIssued
   } else if (parsed.eventType === "amazon.return_dropped_off") {
-    payload.estimated_refund = parsed.estimatedRefund
-    if (parsed.refundBy) {
-      payload.refund_by = parsed.refundBy
-    }
+    payload.estimated_refund = parsed.refundTotalEstimated
+    ;(payload.amazon as Record<string, unknown>).refund_total_estimated = parsed.refundTotalEstimated
   }
 
   return payload
@@ -201,21 +220,18 @@ async function main(): Promise<void> {
           email_id: email.id,
           event_type: parsed.eventType,
           order_id: parsed.orderId,
-          item_title: parsed.itemTitle,
+          item_title: parsed.items[0]?.title ?? null,
         })
         continue
       }
 
       const amountTotal =
         parsed.eventType === "amazon.return_requested"
-          ? parsed.amountTotal
+          ? parsed.refundTotalEstimated
           : parsed.eventType === "amazon.refund_issued"
-          ? parsed.refundAmount
-          : parsed.estimatedRefund
-      const primaryDate =
-        parsed.eventType === "amazon.return_requested"
-          ? parsed.dropOffBy
-          : email.receivedAt.toISOString().slice(0, 10)
+          ? parsed.refundAmountIssued
+          : parsed.refundTotalEstimated
+      const primaryDate = email.receivedAt.toISOString().slice(0, 10)
       const dedupeKey = buildSignalEventDedupeKey({
         provider: email.provider,
         mailAccountId: email.mailAccountId,

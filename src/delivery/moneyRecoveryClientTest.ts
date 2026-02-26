@@ -144,7 +144,7 @@ async function testRefundIssuedArrivesFirst(): Promise<void> {
     if (u.endsWith("/rvi")) return mkRes(201, { id: 777 })
     if (u.includes("/rvi/777/external-references")) return mkRes(200, { ok: true })
     if (u.endsWith("/rvi/777")) return mkRes(200, { flows: [{ id: 888, type: "return" }] })
-    if (u.includes("/return-flows/888/refund")) return mkRes(200, { ok: true })
+    if (u.includes("/return-flows/888/refund-detected")) return mkRes(200, { ok: true })
 
     return mkRes(500, { error: "unexpected", url: u })
   }) as any
@@ -165,7 +165,10 @@ async function testRefundIssuedArrivesFirst(): Promise<void> {
 
   assert(result.status === "accepted", `expected accepted, got ${result.status}`)
   assert(calls.some((c) => c.url.endsWith("/rvi") && c.method === "POST"), "expected create when refund arrives first")
-  assert(calls.some((c) => c.url.includes("/return-flows/888/refund")), "expected immediate refund call")
+  assert(
+    calls.some((c) => c.url.includes("/return-flows/888/refund-detected")),
+    "expected refund-detected call"
+  )
 }
 
 async function testManulifeClaimPaidUpdatesClaimFlow(): Promise<void> {

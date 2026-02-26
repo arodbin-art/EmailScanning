@@ -23,3 +23,15 @@ See `docs/azure-deploy.md` for the dev Container Apps job deployment.
 
 ## Handoff
 See HANDOFF.md for current state, progress, and next steps.
+
+## Vault-backed config
+Secrets/config are now sourced from `vaultSolution` runtime outputs.
+
+```bash
+cd /media/nas/workspaces/vaultSolution
+bin/vaultctl render --project EmailScanning
+
+cd /media/nas/workspaces/EmailScanning
+bash scripts/use-vault-env.sh
+npm run verify:secrets
+```

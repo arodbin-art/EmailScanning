@@ -7,8 +7,12 @@ type TokenProvider = () => Promise<string | undefined>
 type AmazonEventContext = {
   orderId: string
   amountTotal: number | null
+  refundDetectedAmount: number | null
   itemTitle: string | null
+  itemTitles: string[]
   deadlineDate: string | null
+  refundDestinationText: string | null
+  statusText: string | null
   paymentMethodLast4: string | null
   emailSubject: string | null
   emailReceivedAt: string | null
@@ -68,25 +72,29 @@ export class MoneyRecoveryClient implements DeliveryClient {
       return resolved.result
     }
 
-    const applied = await this.applyAmazonEvent({
-      input,
-      payload,
-      amazon,
-      rviId: resolved.rviId,
-    })
-    if (applied.kind === "error") {
-      return applied.result
+    for (const rviId of resolved.rviIds) {
+      const applied = await this.applyAmazonEvent({
+        input,
+        payload,
+        amazon,
+        rviId,
+      })
+      if (applied.kind === "error") {
+        return applied.result
+      }
     }
 
     return {
       status: "accepted",
       raw: {
         source_event_id: input.eventId,
-        rvi_id: resolved.rviId,
+        rvi_ids: resolved.rviIds,
+        rvi_id: resolved.rviIds[0] ?? null,
         linked: true,
         event_type: input.eventType,
         order_id: amazon.orderId,
-        created: resolved.created,
+        created: resolved.createdRviId !== null,
+        created_rvi_id: resolved.createdRviId,
       },
     }
   }
@@ -125,17 +133,18 @@ export class MoneyRecoveryClient implements DeliveryClient {
   private async resolveRviForAmazonEvent(
     input: OutboxDeliveryInput,
     amazon: AmazonEventContext
-  ): Promise<{ kind: "ok"; rviId: number; created: boolean } | { kind: "error"; result: DeliveryResult }> {
+  ): Promise<
+    | { kind: "ok"; rviIds: number[]; createdRviId: number | null }
+    | { kind: "error"; result: DeliveryResult }
+  > {
     const lookup = await this.lookupExternalReference(amazon.orderId, "amazon_order_id")
     if (lookup.kind === "error") return lookup
-    if (lookup.rviId) {
-      const ensured = await this.ensureExternalReference(
-        lookup.rviId,
-        "amazon_order_id",
-        amazon.orderId
-      )
-      if (ensured.kind === "error") return ensured
-      return { kind: "ok", rviId: lookup.rviId, created: false }
+    if (lookup.rviIds.length > 0) {
+      for (const rviId of lookup.rviIds) {
+        const ensured = await this.ensureExternalReference(rviId, "amazon_order_id", amazon.orderId)
+        if (ensured.kind === "error") return ensured
+      }
+      return { kind: "ok", rviIds: lookup.rviIds, createdRviId: null }
     }
 
     if (amazon.amountTotal !== null) {
@@ -149,7 +158,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
         const rviId = candidates.data[0].id
         const ensured = await this.ensureExternalReference(rviId, "amazon_order_id", amazon.orderId)
         if (ensured.kind === "error") return ensured
-        return { kind: "ok", rviId, created: false }
+        return { kind: "ok", rviIds: [rviId], createdRviId: null }
       }
       if (candidates.data.length > 1) {
         return {
@@ -157,7 +166,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
           result: {
             status: "needs_review",
             raw: {
-              reason: "multiple_candidate_rvis",
+              reason: "ambiguous_match",
               order_id: amazon.orderId,
               amount_total: amazon.amountTotal,
               candidates: candidates.data,
@@ -191,7 +200,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
       amazon.orderId
     )
     if (ensured.kind === "error") return ensured
-    return { kind: "ok", rviId: created.rviId, created: true }
+    return { kind: "ok", rviIds: [created.rviId], createdRviId: created.rviId }
   }
 
   private async resolveRviForManulifeEvent(
@@ -216,14 +225,11 @@ export class MoneyRecoveryClient implements DeliveryClient {
 
     const lookup = await this.lookupExternalReference(manulife.claimId, "manulife_claim_id")
     if (lookup.kind === "error") return lookup
-    if (lookup.rviId) {
-      const ensured = await this.ensureExternalReference(
-        lookup.rviId,
-        "manulife_claim_id",
-        manulife.claimId
-      )
+    if (lookup.rviIds.length > 0) {
+      const rviId = lookup.rviIds[0]
+      const ensured = await this.ensureExternalReference(rviId, "manulife_claim_id", manulife.claimId)
       if (ensured.kind === "error") return ensured
-      return { kind: "ok", rviId: lookup.rviId, created: false }
+      return { kind: "ok", rviId, created: false }
     }
 
     const personCode = normalizePersonCode(input.mailAccountPersonCode)
@@ -311,7 +317,11 @@ export class MoneyRecoveryClient implements DeliveryClient {
     }
 
     if (params.input.eventType === "amazon.return_dropped_off") {
-      if (returnFlow.status === "submitted" || returnFlow.status === "complete") {
+      if (
+        returnFlow.status === "submitted" ||
+        returnFlow.status === "complete" ||
+        returnFlow.status === "refund_pending_verification"
+      ) {
         return { kind: "ok" }
       }
       return this.markReturnFlowSubmitted(returnFlow.id, params.input.eventId)
@@ -321,12 +331,28 @@ export class MoneyRecoveryClient implements DeliveryClient {
       if (returnFlow.status === "complete") {
         return { kind: "ok" }
       }
-      const refundedAt = asString((params.payload as any)?.email?.received_at) ?? undefined
-      return this.markReturnFlowRefunded(
+      const detectedAt = params.amazon.emailReceivedAt ?? asString((params.payload as any)?.received_at) ?? undefined
+      const amount = params.amazon.refundDetectedAmount ?? params.amazon.amountTotal
+      if (amount === null || amount <= 0) {
+        return {
+          kind: "error",
+          result: {
+            status: "needs_review",
+            raw: {
+              reason: "missing_refund_detected_amount",
+              event_type: params.input.eventType,
+              order_id: params.amazon.orderId,
+              rvi_id: params.rviId,
+            },
+          },
+        }
+      }
+      return this.markReturnFlowRefundDetected(
         returnFlow.id,
         params.input.eventId,
-        refundedAt,
-        params.amazon.amountTotal ?? undefined
+        amount,
+        detectedAt,
+        params.amazon.refundDestinationText ?? undefined
       )
     }
 
@@ -484,6 +510,15 @@ export class MoneyRecoveryClient implements DeliveryClient {
       }
     }
 
+    if (amazon.refundDestinationText) {
+      const existingMemo = asString((body.memo as string | undefined) ?? asString((detail.data as any)?.memo))
+      const destinationTag = `[AmazonDestination] ${amazon.refundDestinationText}`
+      if (!existingMemo || !existingMemo.includes(destinationTag)) {
+        body.memo = appendMemo(existingMemo, destinationTag)
+        hasChange = true
+      }
+    }
+
     if (!hasChange) {
       return { kind: "ok" }
     }
@@ -500,7 +535,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
     personCode: string
   ): Promise<{ kind: "ok"; rviId: number } | { kind: "error"; result: DeliveryResult }> {
     const purchaseDate = dateOnlyFromIso(amazon.emailReceivedAt) ?? todayIsoDate()
-    const amountTotal = amazon.amountTotal
+    const amountTotal = amazon.amountTotal ?? amazon.refundDetectedAmount
     if (amountTotal === null || amountTotal <= 0) {
       return {
         kind: "error",
@@ -515,8 +550,10 @@ export class MoneyRecoveryClient implements DeliveryClient {
       `Auto-created from Amazon email (${eventType})`,
       `order_id=${amazon.orderId}`,
       amazon.itemTitle ? `item=${amazon.itemTitle}` : null,
+      amazon.itemTitles.length > 1 ? `items=${amazon.itemTitles.join("; ")}` : null,
       amazon.emailSubject ? `subject=${amazon.emailSubject}` : null,
       amazon.paymentMethodLast4 ? `payment_last4=${amazon.paymentMethodLast4}` : null,
+      amazon.refundDestinationText ? `refund_destination=${amazon.refundDestinationText}` : null,
     ].filter((part): part is string => Boolean(part))
     const memo = truncateMemo(memoParts.join(" | "))
 
@@ -603,14 +640,14 @@ export class MoneyRecoveryClient implements DeliveryClient {
   private async lookupExternalReference(
     refValue: string,
     refType: string
-  ): Promise<{ kind: "ok"; rviId: number | null } | { kind: "error"; result: DeliveryResult }> {
+  ): Promise<{ kind: "ok"; rviIds: number[] } | { kind: "error"; result: DeliveryResult }> {
     const byNewSource = await this.lookupExternalReferenceBySource(
       "email_scanning",
       refType,
       refValue
     )
     if (byNewSource.kind === "error") return byNewSource
-    if (byNewSource.rviId) return byNewSource
+    if (byNewSource.rviIds.length > 0) return byNewSource
 
     // Backward compatibility for references created before source normalization.
     return this.lookupExternalReferenceBySource("signal-engine", refType, refValue)
@@ -620,7 +657,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
     source: string,
     refType: string,
     refValue: string
-  ): Promise<{ kind: "ok"; rviId: number | null } | { kind: "error"; result: DeliveryResult }> {
+  ): Promise<{ kind: "ok"; rviIds: number[] } | { kind: "error"; result: DeliveryResult }> {
     const qs = new URLSearchParams({
       source,
       ref_type: refType,
@@ -628,19 +665,26 @@ export class MoneyRecoveryClient implements DeliveryClient {
     })
     const res = await this.requestJson("GET", `/rvi/external-references/lookup?${qs.toString()}`)
     if (res.httpStatus === 404) {
-      return { kind: "ok", rviId: null }
+      return { kind: "ok", rviIds: [] }
     }
     if (!res.ok) {
       return { kind: "error", result: { status: "rejected", raw: res } }
     }
-    const rviId = asNumber((res.json as any)?.rvi_id)
-    if (!rviId) {
+    const rawIds = (res.json as any)?.rvi_ids
+    const rviIds = Array.isArray(rawIds)
+      ? rawIds.map((row: unknown) => asNumber(row)).filter((id): id is number => id !== null)
+      : []
+    const fallbackId = asNumber((res.json as any)?.rvi_id)
+    if (rviIds.length === 0 && fallbackId) {
+      return { kind: "ok", rviIds: [fallbackId] }
+    }
+    if (rviIds.length === 0) {
       return {
         kind: "error",
         result: { status: "needs_review", raw: { reason: "bad_lookup_response", res } },
       }
     }
-    return { kind: "ok", rviId }
+    return { kind: "ok", rviIds: Array.from(new Set(rviIds)) }
   }
 
   private async ensureExternalReference(
@@ -764,19 +808,21 @@ export class MoneyRecoveryClient implements DeliveryClient {
     return { kind: "ok" }
   }
 
-  private async markReturnFlowRefunded(
+  private async markReturnFlowRefundDetected(
     returnFlowId: number,
     sourceEventId: number,
-    refundedAt?: string,
-    refundAmount?: number
+    amount: number,
+    detectedAt?: string,
+    destinationText?: string
   ): Promise<{ kind: "ok" } | { kind: "error"; result: DeliveryResult }> {
     const body: Record<string, unknown> = {
-      refunded: true,
-      source_event_id: sourceEventId,
+      amount,
+      source: "email_scanning",
+      sourceEventId: String(sourceEventId),
     }
-    if (refundedAt) body.refunded_at = refundedAt
-    if (refundAmount !== undefined) body.refund_amount = refundAmount
-    const res = await this.requestJson("PATCH", `/return-flows/${returnFlowId}/refund`, body)
+    if (detectedAt) body.detectedAt = detectedAt
+    if (destinationText) body.destinationText = destinationText
+    const res = await this.requestJson("PATCH", `/return-flows/${returnFlowId}/refund-detected`, body)
     if (!res.ok) {
       if (isReturnFlowManualReviewError(res)) {
         return { kind: "error", result: { status: "needs_review", raw: res } }
@@ -791,19 +837,44 @@ export class MoneyRecoveryClient implements DeliveryClient {
   }
 
   private toAmazonContext(payload: Record<string, unknown>): AmazonEventContext {
+    const amazon = (payload as any)?.amazon ?? {}
+    const itemRows = Array.isArray(amazon?.items)
+      ? amazon.items
+      : Array.isArray((payload as any)?.items)
+      ? (payload as any).items
+      : []
+    const itemTitles = itemRows
+      .map((row: any) => asString(row?.title))
+      .filter((title: string | null): title is string => Boolean(title))
+    const itemTitle = asString(amazon?.item_title) ?? asString(payload.item_title) ?? itemTitles[0] ?? null
+    const amountTotal = inferAmount([
+      amazon?.refund_total_estimated,
+      payload.amount_total,
+      payload.amount,
+      payload.estimated_refund,
+    ])
+    const refundDetectedAmount = inferAmount([
+      amazon?.refund_amount_issued,
+      payload.refund_amount,
+      payload.amount_total,
+      payload.estimated_refund,
+    ])
     return {
-      orderId: asString(payload.order_id) ?? "",
-      amountTotal: inferAmount([
-        payload.amount_total,
-        payload.amount,
-        payload.refund_amount,
-        payload.estimated_refund,
-      ]),
-      itemTitle: asString(payload.item_title),
-      deadlineDate: asString(payload.deadline_date) ?? asString(payload.drop_off_by),
-      paymentMethodLast4: asString(payload.payment_method_last4),
+      orderId: asString(amazon?.order_id) ?? asString(payload.order_id) ?? "",
+      amountTotal,
+      refundDetectedAmount,
+      itemTitle,
+      itemTitles,
+      deadlineDate:
+        asString(amazon?.dropoff_deadline_date) ??
+        asString(payload.deadline_date) ??
+        asString(payload.drop_off_by),
+      refundDestinationText:
+        asString(amazon?.refund_destination_text) ?? asString(payload.refund_destination_text),
+      statusText: asString(amazon?.status_text) ?? asString(payload.status_text),
+      paymentMethodLast4: asString(amazon?.payment_method_last4) ?? asString(payload.payment_method_last4),
       emailSubject: asString((payload as any)?.email?.subject),
-      emailReceivedAt: asString((payload as any)?.email?.received_at),
+      emailReceivedAt: asString(payload.received_at) ?? asString((payload as any)?.email?.received_at),
     }
   }
 

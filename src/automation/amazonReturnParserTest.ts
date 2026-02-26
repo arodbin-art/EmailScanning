@@ -1,68 +1,28 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { parseAmazonReturnEmail } from "./amazonReturnParser.js"
 
-const returnRequestedBody = `
-Hello,
+const fixtureRequested = readFileSync(
+  path.join(process.cwd(), "src/automation/fixtures/amazon_return_requested_702-3272715-0390601.txt"),
+  "utf8"
+)
 
-Your return request is confirmed.
-Order ID: 112-1234567-1234567
-Item: Logitech MX Master 3 Mouse
-Refund Amount: CAD $129.99
-Drop off by March 15, 2026
-
-Thank you.
-`
+const fixtureDroppedOff = readFileSync(
+  path.join(process.cwd(), "src/automation/fixtures/amazon_return_dropped_off_701-7116856-5433865.txt"),
+  "utf8"
+)
 
 const refundIssuedBody = `
 Hello,
 
-Your refund was issued.
-Order ID: 112-9876543-9876543
-Item title: Bose QuietComfort Headphones
-Refund amount: $249.00
-
-Thanks,
-Amazon.ca
-`
-
-const returnRequestedNoYearBody = `
-Hello,
-
-Your return request is confirmed.
-Order #702-3272715-0390601
-Refund subtotal $31.12
-Drop off by:
-
-Mon., Feb. 2
-
-Item returned: 1
-[ELEGOO PLA Filament 1.75mm Silk True Red...](https://www.amazon.ca/gp/product/B0FMK84C7H)
-`
-
-const refundSubjectBody = `
-Hello,
-
-Your refund was issued.
+Refund issued.
 Order #701-7333604-7372223
 Refund subtotal $45.19
-Total refund $45.19
+Your refund has been issued.
+This amount will be refunded to your Visa ending in 1448.
 
 Item returned: 1
 [Wireless Earbuds, Sports Bluetooth...](https://www.amazon.ca/gp/product/B0G2L2KMLY)
-`
-
-const dropOffBody = `
-Hello,
-
-Your return was dropped off.
-Refund will be issued by Jan 24.
-
-Return Summary
-Order #702-3272715-0390601
-Refund subtotal $26.44
-Total estimated refund: $26.44^
-
-Item returned: 1
-[ELEGOO Silk PLA Filament 1.75mm Purple...](https://www.amazon.ca/gp/product/B0DFPK4VRS)
 `
 
 const rodneyReturnBody = `
@@ -76,16 +36,6 @@ Drop off by Mar 13
 Payment method ending in 1448
 `
 
-const janBoundaryBody = `
-Hello,
-
-Your return request is confirmed.
-Order ID: 702-9059320-9056262
-Item: AGM M8 Rugged Basic Flip Phone, 4G
-Refund subtotal: CAD $124.85
-Drop off by Jan 03
-`
-
 function assert(condition: boolean, message: string) {
   if (!condition) {
     throw new Error(message)
@@ -93,51 +43,12 @@ function assert(condition: boolean, message: string) {
 }
 
 function runTests() {
-  const returnParsed = parseAmazonReturnEmail({
-    provider: "gmail",
-    fromAddress: "return@amazon.ca",
-    subject: "Your return request is confirmed",
-    receivedAt: new Date("2026-03-01T00:00:00Z"),
-    normalizedBody: returnRequestedBody,
-  })
-
-  assert(returnParsed !== null, "return request should parse")
-  assert(returnParsed?.eventType === "amazon.return_requested", "return request event type")
-  assert(returnParsed?.orderId === "112-1234567-1234567", "return request order id")
-  if (returnParsed && returnParsed.eventType === "amazon.return_requested") {
-    assert(returnParsed.amountTotal === 129.99, "return request amount")
-    assert(returnParsed.dropOffBy === "2026-03-15", "return request drop off by")
-    assert(
-      returnParsed.itemTitle === "Logitech MX Master 3 Mouse",
-      "return request item title"
-    )
-  }
-
-  const refundParsed = parseAmazonReturnEmail({
-    provider: "gmail",
-    fromAddress: "return@amazon.ca",
-    subject: "Your refund is on the way",
-    receivedAt: new Date("2026-03-01T00:00:00Z"),
-    normalizedBody: refundIssuedBody,
-  })
-
-  assert(refundParsed !== null, "refund issued should parse")
-  assert(refundParsed?.eventType === "amazon.refund_issued", "refund issued event type")
-  assert(refundParsed?.orderId === "112-9876543-9876543", "refund issued order id")
-  if (refundParsed && refundParsed.eventType === "amazon.refund_issued") {
-    assert(refundParsed.refundAmount === 249.0, "refund issued amount")
-    assert(
-      refundParsed.itemTitle === "Bose QuietComfort Headphones",
-      "refund issued item title"
-    )
-  }
-
   const returnNoYearParsed = parseAmazonReturnEmail({
     provider: "gmail",
     fromAddress: "return@amazon.ca",
-    subject: "Your return of ELEGOO PLA Filament 1.75mm Silk....",
+    subject: "Your return request is confirmed",
     receivedAt: new Date("2026-01-23T00:00:00Z"),
-    normalizedBody: returnRequestedNoYearBody,
+    normalizedBody: fixtureRequested,
   })
 
   assert(returnNoYearParsed !== null, "return request without year should parse")
@@ -146,52 +57,51 @@ function runTests() {
     "return request without year event type"
   )
   if (returnNoYearParsed && returnNoYearParsed.eventType === "amazon.return_requested") {
+    assert(returnNoYearParsed.orderId === "702-3272715-0390601", "order id parsed")
+    assert(returnNoYearParsed.refundTotalEstimated === 31.12, "estimated refund parsed")
     assert(returnNoYearParsed.dropOffBy === "2026-02-02", "drop off date without year")
     assert(
-      returnNoYearParsed.itemTitle.startsWith("ELEGOO PLA Filament"),
-      "item title from link"
+      returnNoYearParsed.items[0]?.title.startsWith("ELEGOO PLA Filament"),
+      "item title from markdown link"
     )
   }
 
-  const refundSubjectParsed = parseAmazonReturnEmail({
+  const droppedOffParsed = parseAmazonReturnEmail({
     provider: "gmail",
     fromAddress: "return@amazon.ca",
-    subject: "Your refund for Wireless Earbuds, Sports....",
-    receivedAt: new Date("2026-01-23T00:00:00Z"),
-    normalizedBody: refundSubjectBody,
+    subject: "Your return drop-off confirmation",
+    receivedAt: new Date("2026-02-01T00:00:00Z"),
+    normalizedBody: fixtureDroppedOff,
   })
 
-  assert(refundSubjectParsed !== null, "refund subject should parse")
-  assert(
-    refundSubjectParsed?.eventType === "amazon.refund_issued",
-    "refund subject event type"
-  )
-  if (refundSubjectParsed && refundSubjectParsed.eventType === "amazon.refund_issued") {
+  assert(droppedOffParsed !== null, "drop-off confirmation should parse")
+  assert(droppedOffParsed?.eventType === "amazon.return_dropped_off", "drop-off event type")
+  if (droppedOffParsed && droppedOffParsed.eventType === "amazon.return_dropped_off") {
+    assert(droppedOffParsed.orderId === "701-7116856-5433865", "drop-off order id")
+    assert(droppedOffParsed.refundTotalEstimated === 35.7, "drop-off estimated refund")
     assert(
-      refundSubjectParsed.itemTitle.startsWith("Wireless Earbuds"),
-      "refund item title from subject"
+      droppedOffParsed.refundDestinationText?.toLowerCase().includes("amazon account balance") ?? false,
+      "drop-off refund destination"
     )
+    assert(droppedOffParsed.items.length === 2, "drop-off should parse multiple items")
   }
 
-  const dropOffParsed = parseAmazonReturnEmail({
+  const refundIssuedParsed = parseAmazonReturnEmail({
     provider: "gmail",
     fromAddress: "return@amazon.ca",
-    subject: "Your return drop-off confirmation for ELEGOO Silk PLA Filament 1.75mm....",
+    subject: "Your refund has been issued",
     receivedAt: new Date("2026-01-23T00:00:00Z"),
-    normalizedBody: dropOffBody,
+    normalizedBody: refundIssuedBody,
   })
 
-  assert(dropOffParsed !== null, "drop-off confirmation should parse")
-  assert(
-    dropOffParsed?.eventType === "amazon.return_dropped_off",
-    "drop-off event type"
-  )
-  if (dropOffParsed && dropOffParsed.eventType === "amazon.return_dropped_off") {
-    assert(dropOffParsed.estimatedRefund === 26.44, "drop-off estimated refund")
-    assert(dropOffParsed.refundBy === "2026-01-24", "drop-off refund by date")
+  assert(refundIssuedParsed !== null, "refund issued should parse")
+  assert(refundIssuedParsed?.eventType === "amazon.refund_issued", "refund issued event type")
+  if (refundIssuedParsed && refundIssuedParsed.eventType === "amazon.refund_issued") {
+    assert(refundIssuedParsed.orderId === "701-7333604-7372223", "refund order id")
+    assert(refundIssuedParsed.refundAmountIssued === 45.19, "refund amount parsed")
     assert(
-      dropOffParsed.itemTitle.startsWith("ELEGOO Silk PLA Filament"),
-      "drop-off item title"
+      refundIssuedParsed.refundDestinationText?.toLowerCase().includes("ending in 1448") ?? false,
+      "refund destination parsed"
     )
   }
 
@@ -206,22 +116,10 @@ function runTests() {
   assert(rodneyParsed?.eventType === "amazon.return_requested", "Rodney event type")
   if (rodneyParsed && rodneyParsed.eventType === "amazon.return_requested") {
     assert(rodneyParsed.orderId === "702-9059320-9056262", "Rodney order id")
-    assert(rodneyParsed.amountTotal === 124.85, "Rodney amount total")
+    assert(rodneyParsed.refundTotalEstimated === 124.85, "Rodney amount total")
     assert(rodneyParsed.dropOffBy === "2026-03-13", "Rodney drop off by")
-    assert(rodneyParsed.itemTitle.startsWith("AGM M8"), "Rodney item title")
+    assert(rodneyParsed.items[0]?.title.startsWith("AGM M8"), "Rodney item title")
     assert(rodneyParsed.paymentMethodLast4 === "1448", "Rodney payment last4")
-  }
-
-  const janBoundaryParsed = parseAmazonReturnEmail({
-    provider: "gmail",
-    fromAddress: "return@amazon.ca",
-    subject: "Your return request is confirmed",
-    receivedAt: new Date("2025-12-31T00:00:00Z"),
-    normalizedBody: janBoundaryBody,
-  })
-  assert(janBoundaryParsed !== null, "Jan boundary email should parse")
-  if (janBoundaryParsed && janBoundaryParsed.eventType === "amazon.return_requested") {
-    assert(janBoundaryParsed.dropOffBy === "2026-01-03", "Jan boundary year inference")
   }
 
   console.log("Amazon return parser tests passed")

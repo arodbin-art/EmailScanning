@@ -110,6 +110,22 @@ model EventsOutbox {
   @@map("events_outbox")
 }
 
+model AiCandidateEvent {
+  id         String    @id @default(uuid()) @db.Text
+  emailId    String    @map("email_id") @db.Text
+  provider   String    @db.VarChar(50)
+  eventType  String    @map("event_type") @db.VarChar(100)
+  primaryRef String?   @map("primary_ref") @db.Text
+  amount     Decimal?  @db.Decimal(12, 2)
+  occurredAt DateTime? @map("occurred_at") @db.Timestamp(6)
+  payloadJson Json     @map("payload_json")
+  confidence Float?
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@index([emailId])
+  @@map("ai_candidate_events")
+}
+
 model EventsDeliveryLog {
   eventId     Int       @map("event_id")
   rviResponse Json      @map("rvi_response")

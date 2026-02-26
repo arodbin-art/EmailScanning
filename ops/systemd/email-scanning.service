@@ -6,7 +6,8 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/media/nas/workspaces/EmailScanning
 EnvironmentFile=/media/nas/workspaces/EmailScanning/.env
-ExecStart=/bin/bash -lc 'mkdir -p /media/nas/workspaces/EmailScanning/logs && /usr/bin/npm run run:scheduled >> /media/nas/workspaces/EmailScanning/logs/email-scanning.log 2>&1'
+Environment=VAULT_ENV_FILE=/home/rod/.config/vaultsolution/vault.env
+ExecStart=/bin/bash -lc 'mkdir -p /media/nas/workspaces/EmailScanning/logs && /usr/bin/npm run run:scheduled:vault >> /media/nas/workspaces/EmailScanning/logs/email-scanning.log 2>&1'
 Nice=10
 
 [Install]

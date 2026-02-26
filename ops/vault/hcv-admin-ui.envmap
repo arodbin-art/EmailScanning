@@ -1,0 +1,2 @@
+# ENV_VAR=canonical/id
+VITE_ADMIN_TOKEN=signal-engine/dev/admin_token

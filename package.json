@@ -18,12 +18,21 @@
     "deliver:backfill:amazon": "node --no-warnings ./dist/delivery/backfillAmazonRejected.js",
     "replay:amazon": "node --no-warnings ./dist/automation/amazonReturnReplay.js",
     "replay:manulife": "node --no-warnings ./dist/automation/manulifeClaimReplay.js",
+    "compare:intelligence": "node --no-warnings ./dist/analysis/compareDeterministicVsAi.js",
+    "backfill:intelligence": "node --no-warnings ./dist/analysis/backfillAiCandidates.js",
     "run:scheduled": "node --no-warnings ./dist/ops/runScheduledCycle.js",
     "test:amazon:return-parser": "tsc -p tsconfig.json && node --no-warnings dist/automation/amazonReturnParserTest.js",
     "test:amazon": "tsc -p tsconfig.json && node --no-warnings dist/automation/amazonReturnParserTest.js",
     "test:manulife": "tsc -p tsconfig.json && node --no-warnings dist/automation/manulifeClaimParserTest.js",
+    "test:igpt": "tsc -p tsconfig.json && node --no-warnings dist/intelligence/igptProviderTest.js",
+    "test:intelligence:shadow": "tsc -p tsconfig.json && node --no-warnings dist/intelligence/shadowRuntimeTest.js",
     "test:ingestion:entrypoint": "tsc -p tsconfig.json && node --no-warnings dist/ingestion/indexTest.js",
-    "test:delivery:money-recovery": "tsc -p tsconfig.json && node --no-warnings dist/delivery/moneyRecoveryClientTest.js"
+    "test:delivery:money-recovery": "tsc -p tsconfig.json && node --no-warnings dist/delivery/moneyRecoveryClientTest.js",
+    "poll:vault": "./ops/vault/run_with_hcv.sh ./ops/vault/hcv-main.envmap -- node --no-warnings ./dist/ingestion/index.js",
+    "deliver:vault": "./ops/vault/run_with_hcv.sh ./ops/vault/hcv-main.envmap -- node --no-warnings ./dist/delivery/index.js",
+    "run:scheduled:vault": "./ops/vault/run_with_hcv.sh ./ops/vault/hcv-main.envmap -- node --no-warnings ./dist/ops/runScheduledCycle.js",
+    "retention:check:vault": "./ops/vault/run_with_hcv.sh ./ops/vault/hcv-main.envmap -- node --no-warnings ./dist/maintenance/retentionCheck.js",
+    "verify:secrets": "/media/nas/workspaces/vaultSolution/bin/verify-no-secrets /media/nas/workspaces/EmailScanning"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.749.0",

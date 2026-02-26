@@ -1,0 +1,13 @@
+# ENV_VAR=canonical/id
+DATABASE_URL=signal-engine/dev/postgres_url
+AZURE_STORAGE_CONNECTION_STRING=signal-engine/dev/azure_storage_connection_string
+GRAPH_ACCESS_TOKEN=signal-engine/dev/graph_access_token
+GOOGLE_CLIENT_SECRET=signal-engine/dev/google_client_secret
+GMAIL_TOKEN_ENCRYPTION_KEY=signal-engine/dev/gmail_token_encryption_key
+GRAPH_CLIENT_SECRET=signal-engine/dev/graph_client_secret
+RVI_BEARER_TOKEN=signal-engine/dev/rvi_api_token
+OPENAI_API_KEY=signal-engine/dev/openai_api_key
+IGPT_API_KEY=signal-engine/dev/igpt_api_key
+IGPT_SESSION_TOKEN=signal-engine/dev/igpt_session_token
+IGPT_SESSION_DEVICE_ID=signal-engine/dev/igpt_session_device_id
+IGPT_SESSION_USER_ID=signal-engine/dev/igpt_session_user_id

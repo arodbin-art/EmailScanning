@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-22T09:10:00Z
+Last updated: 2026-02-26T09:35:10Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -9,8 +9,48 @@ Last updated: 2026-02-22T09:10:00Z
 - Admin web UI now includes an Events page to review all outbox events, including rejected delivery responses.
 - Admin Mail Accounts UI now supports `moneyrecovery_person_code` mapping per mailbox.
 - Amazon return and refund parsing exists and emits amazon events to events_outbox.
+- Amazon parser now supports all three lifecycle templates with order-level events:
+  - `amazon.return_requested`
+  - `amazon.return_dropped_off`
+  - `amazon.refund_issued`
+- Event payloads now include nested `amazon` data (`order_id`, order-level refund amount, destination text, status text, optional `items[]`) plus common metadata.
 - Parser now handles item titles from subjects/links, drop-off dates without year, and drop-off confirmation emails.
 - Parser now extracts `amount_total` and optional `payment_method_last4` from return-request emails.
+- Added shadow-mode intelligence pipeline:
+  - deterministic provider wrapper + iGPT provider run in parallel during ingestion
+  - iGPT candidates persist to `email_scanning.ai_candidate_events` only
+  - no iGPT writes to `events_outbox` and no delivery-side changes
+  - failures are non-blocking; ingestion logs `stage=igpt_shadow` counts
+- Added iGPT auth fallback mode (optional):
+  - `IGPT_FALLBACK_ENABLED=true` enables Azure OpenAI fallback for Amazon/Manulife-like emails when iGPT returns auth/empty/error.
+  - fallback still writes only to `ai_candidate_events` and never mutates delivery/outbox behavior.
+- Added comparison CLI:
+  - `npm run compare:intelligence -- --since-days 14`
+- Added iGPT shadow backfill CLI for historical stored emails:
+  - `npm run backfill:intelligence -- --since-days 14 --limit 200 --dry-run`
+  - `npm run backfill:intelligence -- --since-days 14 --limit 200`
+  - default behavior skips emails already present in `ai_candidate_events`; use `--force` to reprocess.
+  - supports `--object-timeout-ms` (default `20000`) and `--amazon-manulife-only` filters.
+- Azure dev ingestion job now has iGPT shadow env enabled:
+  - `IGPT_ENABLED=true`
+  - `IGPT_BASE_URL=https://api.igpt.ai`
+  - `IGPT_TIMEOUT_MS=5000`
+  - `IGPT_FALLBACK_ENABLED=true`
+  - image: `emailscanacr354705.azurecr.io/signal-engine:manual-igpt-fallback-20260226-074551`
+- iGPT auth status:
+  - direct API-key endpoint (`https://api.igpt.ai/v1/recall/ask`) still returns `{"error":"auth"}` for tested `ak:` keys.
+  - session-mode fallback (`x-token` + `x-deviceId`) is implemented and now stored in HCV:
+    - `signal-engine/dev/igpt_session_token`
+    - `signal-engine/dev/igpt_session_device_id`
+    - `signal-engine/dev/igpt_session_user_id`
+- Latest targeted backfill (session mode, no fallback) succeeded:
+  - `npm run backfill:intelligence -- --since-days 365 --limit 200 --provider gmail --force --amazon-manulife-only --object-timeout-ms 10000`
+  - summary: `scanned=43`, `processed=43`, `failed=0`, `persisted_signals=21`
+- Local plaintext secrets moved under vaultSolution runtime and replaced with compatibility symlinks:
+  - `/media/nas/workspaces/vaultSolution/runtime/email-scanning/`
+- Added fixture-based parser tests for:
+  - request confirmed (`702-3272715-0390601`, amount `31.12`, deadline `Feb 2`)
+  - dropped off (`701-7116856-5433865`, amount `35.70`)
 - Amazon replay emitted 12 events to events_outbox.
 - Near-miss logging added for failed Amazon parsing (amazon_return_near_miss), with optional Azure OpenAI suggestions.
 - Amazon near-miss AI suggestions enabled in Azure dev job (AMAZON_AI_ENABLED=true).
@@ -27,10 +67,13 @@ Last updated: 2026-02-22T09:10:00Z
 - Delivery now supports both Amazon and Manulife event families.
 - Delivery auth supports unattended Entra client-credentials token minting (`RVI_AUTH_MODE=client_credentials`) with v2->v1 fallback.
 - External reference source normalized to `email_scanning` (with backward lookup fallback for `signal-engine`).
-- Added unified NAS scheduled runner (`npm run run:scheduled`) with systemd units:
+- Added unified NAS scheduled runner (`npm run run:scheduled:vault`) with systemd units:
   - `ops/systemd/email-scanning.service`
   - `ops/systemd/email-scanning.timer`
   - `ops/systemd/email-scanning.logrotate`
+- systemd service template now exports:
+  - `VAULT_ENV_FILE=/home/rod/.config/vaultsolution/vault.env`
+  - to load HCV credentials for vault-injected runtime secrets.
 - Systemd timer `email-scanning.timer` is installed and active (15-minute cadence).
 - Legacy `signal-engine-poll.timer` disabled to avoid duplicate poll runs.
 - Current ingestion blocker on NAS: Gmail OAuth refresh returns `invalid_grant` for mail account `id=1`; delivery still runs.
@@ -116,9 +159,9 @@ Last updated: 2026-02-22T09:10:00Z
 
 ## Amazon return parsing
 - Parser file: src/automation/amazonReturnParser.ts
-- Emits events: amazon.return_requested and amazon.refund_issued
-- Dedupe: md5 of provider, order_id, event_type
-- Payload includes order_id, item_title, amount or refund_amount, drop_off_by, and email metadata
+- Emits events: amazon.return_requested, amazon.return_dropped_off, amazon.refund_issued
+- Dedupe: md5 of provider + mail account + event type + order_id + primary amount + received_at date
+- Payload includes common metadata plus nested `amazon` object with order-level details
 
 ## RVI integration plan
 - Signal engine emits Amazon events to `events_outbox`.
@@ -129,7 +172,8 @@ Last updated: 2026-02-22T09:10:00Z
 - If still missing and no person code mapping, mark outbox event `needs_review` with reason `missing_person_code_mapping_for_mail_account`.
 - For `amazon.return_dropped_off`, marks return flow submitted.
 - For `amazon.return_requested`, marks return requested and applies deadline/amount/title when available.
-- For `amazon.refund_issued`, marks return flow refunded (uses email received timestamp as `refunded_at`).
+- For `amazon.refund_issued`, delivery now calls MoneyRecovery `PATCH /return-flows/:id/refund-detected` and does **not** finalize refund.
+- Delivery now accepts one or many RVIs for the same order lookup (`rvi_ids`) and applies updates across all matches.
 - Auto-create is now allowed via explicit per-mail-account person code mapping.
 
 ## Latest status (2026-02-22)

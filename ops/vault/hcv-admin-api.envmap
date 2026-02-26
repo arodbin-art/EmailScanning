@@ -1,0 +1,3 @@
+# ENV_VAR=canonical/id
+DATABASE_URL=signal-engine/dev/postgres_url
+ADMIN_TOKEN=signal-engine/dev/admin_token

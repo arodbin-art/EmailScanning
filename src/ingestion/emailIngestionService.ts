@@ -23,6 +23,16 @@ import {
   MANULIFE_EVENT_TYPES,
   buildSignalEventDedupeKey,
 } from "../events/signalEvents.js"
+import { DeterministicProvider } from "../intelligence/deterministicProvider.js"
+import { IGPTProvider } from "../intelligence/igptProvider.js"
+import {
+  EmailIntelligenceProvider,
+  IntelligenceEmailInput,
+} from "../intelligence/types.js"
+import {
+  persistAiCandidateSignals,
+  safeAnalyzeSignals,
+} from "../intelligence/shadowRuntime.js"
 
 export type IngestionOptions = {
   maxMessagesPerPoll: number
@@ -44,6 +54,8 @@ export class EmailIngestionService {
   private readonly monitorRepository: MonitorRepository
   private readonly monitorEvaluator: MonitorEvaluator
   private readonly aiClient?: AiClient
+  private readonly deterministicProvider: EmailIntelligenceProvider
+  private readonly igptProvider: EmailIntelligenceProvider
   private readonly options: IngestionOptions
 
   constructor(params: {
@@ -52,6 +64,8 @@ export class EmailIngestionService {
     providerResolver: ProviderResolver
     logger: Logger
     aiClient?: AiClient
+    deterministicProvider?: EmailIntelligenceProvider
+    igptProvider?: EmailIntelligenceProvider
     options?: Partial<IngestionOptions>
   }) {
     this.db = params.db
@@ -61,6 +75,8 @@ export class EmailIngestionService {
     this.monitorRepository = new MonitorRepository(params.db)
     this.monitorEvaluator = new MonitorEvaluator()
     this.aiClient = params.aiClient
+    this.deterministicProvider = params.deterministicProvider ?? new DeterministicProvider()
+    this.igptProvider = params.igptProvider ?? new IGPTProvider()
     this.options = {
       maxMessagesPerPoll: params.options?.maxMessagesPerPoll ?? 50,
     }
@@ -221,12 +237,53 @@ export class EmailIngestionService {
       })
     }
 
+    const intelligenceInput: IntelligenceEmailInput = {
+      emailId: String(createdEmail.id),
+      subject: message.subject ?? "",
+      normalizedText: normalized,
+      receivedAt: message.receivedAt,
+      provider: provider.provider,
+      mailAccountId: account.id,
+      fromAddress: message.fromAddress,
+    }
+    const deterministicSignals = await safeAnalyzeSignals({
+      provider: this.deterministicProvider,
+      email: intelligenceInput,
+      providerName: "deterministic",
+      logger: this.logger,
+    })
+    const igptSignals = await safeAnalyzeSignals({
+      provider: this.igptProvider,
+      email: intelligenceInput,
+      providerName: "igpt",
+      logger: this.logger,
+    })
+
     await this.emitDeterministicSignalEvent({
       emailId: createdEmail.id,
       mailAccountId: account.id,
       provider: provider.provider,
       message,
       normalizedBody: normalized,
+    })
+    try {
+      await persistAiCandidateSignals({
+        writer: this.db.aiCandidateEvent,
+        email: intelligenceInput,
+        signals: igptSignals,
+      })
+    } catch (error) {
+      this.logger.warn("igpt_shadow_persist_failed", {
+        stage: "igpt_shadow",
+        emailId: intelligenceInput.emailId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    this.logger.info("igpt_shadow", {
+      stage: "igpt_shadow",
+      emailId: intelligenceInput.emailId,
+      deterministic_count: deterministicSignals.length,
+      igpt_count: igptSignals.length,
     })
 
     await this.evaluateMonitors(account.id, createdEmail.id, provider.provider, message, normalized)
@@ -476,12 +533,25 @@ export class EmailIngestionService {
     const returnRef = extractAmazonReturnReference(params.normalizedBody)
     const amountTotal =
       parsed.eventType === AMAZON_EVENT_TYPES.RETURN_REQUESTED
-        ? parsed.amountTotal
+        ? parsed.refundTotalEstimated
         : parsed.eventType === AMAZON_EVENT_TYPES.REFUND_ISSUED
-        ? parsed.refundAmount
-        : parsed.estimatedRefund
+        ? parsed.refundAmountIssued
+        : parsed.refundTotalEstimated
     const deadlineDate =
-      parsed.eventType === AMAZON_EVENT_TYPES.RETURN_REQUESTED ? parsed.dropOffBy : undefined
+      parsed.eventType === AMAZON_EVENT_TYPES.RETURN_REQUESTED ? parsed.dropOffBy ?? undefined : undefined
+    const items = parsed.items.map((item) => ({
+      title: item.title,
+      qty: item.qty ?? null,
+    }))
+    const amazonBase: Record<string, unknown> = {
+      order_id: parsed.orderId,
+      currency: "CAD",
+      refund_destination_text: parsed.refundDestinationText ?? null,
+      status_text: parsed.statusText,
+    }
+    if (items.length > 0) {
+      amazonBase.items = items
+    }
 
     const payload = this.buildCommonSignalPayload({
       provider: params.provider,
@@ -497,25 +567,30 @@ export class EmailIngestionService {
         currency: "CAD",
         deadline_date: deadlineDate ?? null,
         label_link_present: detectAmazonLabelLink(params.normalizedBody),
-        status_text: summarizeAmazonStatusText(parsed.eventType, params.message.subject),
-        item_title: parsed.itemTitle,
+        status_text: parsed.statusText || summarizeAmazonStatusText(parsed.eventType, params.message.subject),
+        item_title: parsed.items[0]?.title ?? null,
+        amazon: amazonBase,
       },
     })
 
     if (parsed.eventType === AMAZON_EVENT_TYPES.RETURN_REQUESTED) {
-      payload.amount_total = parsed.amountTotal
-      payload.amount = parsed.amountTotal
+      payload.amount_total = parsed.refundTotalEstimated
+      payload.amount = parsed.refundTotalEstimated
       payload.drop_off_by = parsed.dropOffBy
+      ;(payload.amazon as Record<string, unknown>).refund_total_estimated = parsed.refundTotalEstimated
+      ;(payload.amazon as Record<string, unknown>).dropoff_deadline_date = parsed.dropOffBy
+      ;(payload.amazon as Record<string, unknown>).return_method_location =
+        parsed.returnMethodOrLocation ?? null
       if (parsed.paymentMethodLast4) {
         payload.payment_method_last4 = parsed.paymentMethodLast4
+        ;(payload.amazon as Record<string, unknown>).payment_method_last4 = parsed.paymentMethodLast4
       }
     } else if (parsed.eventType === AMAZON_EVENT_TYPES.REFUND_ISSUED) {
-      payload.refund_amount = parsed.refundAmount
+      payload.refund_amount = parsed.refundAmountIssued
+      ;(payload.amazon as Record<string, unknown>).refund_amount_issued = parsed.refundAmountIssued
     } else if (parsed.eventType === AMAZON_EVENT_TYPES.RETURN_DROPPED_OFF) {
-      payload.estimated_refund = parsed.estimatedRefund
-      if (parsed.refundBy) {
-        payload.refund_by = parsed.refundBy
-      }
+      payload.estimated_refund = parsed.refundTotalEstimated
+      ;(payload.amazon as Record<string, unknown>).refund_total_estimated = parsed.refundTotalEstimated
     }
 
     const dedupeKey = buildSignalEventDedupeKey({
@@ -524,7 +599,7 @@ export class EmailIngestionService {
       eventType: parsed.eventType,
       primaryRef: parsed.orderId,
       primaryAmount: amountTotal,
-      primaryDate: deadlineDate ?? params.message.receivedAt.toISOString().slice(0, 10),
+      primaryDate: params.message.receivedAt.toISOString().slice(0, 10),
     })
 
     await this.createOutboxEvent({
@@ -852,6 +927,7 @@ export class EmailIngestionService {
       },
     })
   }
+
 }
 
 type EmitEventParams = {

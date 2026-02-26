@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:vault": "./scripts/run_with_hcv.sh vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "build:vault": "./scripts/run_with_hcv.sh vite build",
+    "preview": "vite preview",
+    "preview:vault": "./scripts/run_with_hcv.sh vite preview"
   },
   "dependencies": {
     "react": "^18.3.1",

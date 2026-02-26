@@ -10,6 +10,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now email-scanning.timer
 ```
 
+Notes:
+- Service template now runs `npm run run:scheduled:vault` (Vault-injected secret env).
+- Ensure `/home/rod/.config/vaultsolution/vault.env` exists with valid `VAULT_ADDR` + `VAULT_TOKEN`.
+
 Check status/logs:
 
 ```bash
@@ -22,7 +26,14 @@ tail -n 200 /media/nas/workspaces/EmailScanning/logs/email-scanning.log
 Manual one-shot run:
 
 ```bash
-npm run run:scheduled
+npm run run:scheduled:vault
+```
+
+Admin local runs (vault-backed):
+
+```bash
+cd email-scanning-admin/api && npm run dev:vault
+cd email-scanning-admin/ui && npm run dev:vault
 ```
 
 ## Log rotation
@@ -43,6 +54,45 @@ Defaults are rules-only:
 Behavior:
 - Missing AI credentials never blocks ingestion.
 - AI is optional and only used for near-miss suggestions.
+
+## iGPT shadow mode (parallel, non-mutating)
+Optional comparison path that runs in parallel with deterministic parsing:
+
+- `IGPT_ENABLED=false` (default)
+- `IGPT_AUTH_MODE=auto` (default; try API key then session)
+- `IGPT_API_KEY=...`
+- `IGPT_BASE_URL=https://api.igpt.ai`
+- `IGPT_SESSION_TOKEN=...`
+- `IGPT_SESSION_DEVICE_ID=...`
+- `IGPT_SESSION_BASE_URL=https://igpt.ai/api/v1`
+- `IGPT_TIMEOUT_MS=5000`
+- `IGPT_FALLBACK_ENABLED=false` (optional, Azure OpenAI fallback when iGPT auth/response fails)
+
+Behavior:
+- iGPT never writes to `events_outbox` in this phase.
+- iGPT candidate signals are stored in `email_scanning.ai_candidate_events` only.
+- Ingestion remains non-blocking if iGPT fails.
+- Optional fallback (`IGPT_FALLBACK_ENABLED=true`) uses configured Azure OpenAI credentials to generate shadow candidates for Amazon/Manulife-like emails when iGPT fails auth or returns empty.
+
+Compare deterministic vs shadow results:
+
+```bash
+npm run compare:intelligence -- --since-days 14
+```
+
+Backfill historical stored emails into `ai_candidate_events` (shadow only):
+
+```bash
+npm run backfill:intelligence -- --since-days 14 --limit 200 --dry-run
+npm run backfill:intelligence -- --since-days 14 --limit 200
+npm run backfill:intelligence -- --since-days 365 --provider gmail --force --amazon-manulife-only --object-timeout-ms 10000
+```
+
+Notes:
+- `--dry-run` analyzes and logs counts, but does not persist rows.
+- default mode skips emails that already have ai candidates; add `--force` to reprocess.
+- `--amazon-manulife-only` narrows scanning to likely Amazon/Manulife senders/subjects.
+- `--object-timeout-ms` prevents hangs on slow object reads (default `20000`).
 
 ## Delivery auth (unattended)
 Preferred: Entra client credentials for delivery worker.

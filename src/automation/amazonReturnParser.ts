@@ -1,5 +1,3 @@
-import crypto from "crypto"
-
 export type AmazonReturnEmailInput = {
   provider: string
   fromAddress: string
@@ -8,28 +6,39 @@ export type AmazonReturnEmailInput = {
   normalizedBody: string
 }
 
+export type AmazonReturnItem = {
+  title: string
+  qty?: number
+}
+
 export type AmazonReturnRequested = {
   eventType: "amazon.return_requested"
   orderId: string
-  amountTotal: number
-  dropOffBy: string
-  itemTitle: string
+  refundTotalEstimated: number
+  dropOffBy: string | null
+  returnMethodOrLocation?: string
+  refundDestinationText?: string
+  items: AmazonReturnItem[]
+  statusText: string
   paymentMethodLast4?: string
 }
 
 export type AmazonRefundIssued = {
   eventType: "amazon.refund_issued"
   orderId: string
-  refundAmount: number
-  itemTitle: string
+  refundAmountIssued: number
+  refundDestinationText?: string
+  items: AmazonReturnItem[]
+  statusText: string
 }
 
 export type AmazonReturnDroppedOff = {
   eventType: "amazon.return_dropped_off"
   orderId: string
-  estimatedRefund: number
-  refundBy?: string
-  itemTitle: string
+  refundTotalEstimated: number
+  refundDestinationText?: string
+  items: AmazonReturnItem[]
+  statusText: string
 }
 
 export type AmazonReturnParseResult =
@@ -46,22 +55,34 @@ export type AmazonReturnNearMissInfo = {
 
 const AMAZON_FROM = /\breturn@amazon\.ca\b/i
 const ORDER_ID_PATTERN = /\b\d{3}-\d{7}-\d{7}\b/
-const RETURN_REQUEST_SUBJECT = /your return request is confirmed/i
-const REFUND_ISSUED_SUBJECT = /your refund (was issued|is on the way)/i
-const RETURN_DROPOFF_SUBJECT = /your return drop-off confirmation/i
-const ITEM_COUNT_PATTERN = /^item(?:\s+to\s+be\s+returned|\s+returned)?\s*:\s*\d+/i
-
-const AMOUNT_PATTERN = /(?:CAD|CDN)\s*\$?\s*(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})|\$\s*(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})/i
+const RETURN_REQUEST_PATTERN = /\byour return request is confirmed\b/i
+const RETURN_DROPPED_OFF_PATTERN =
+  /\b(your return was dropped off|your return is in transit|return drop[-\s]*off confirmation)\b/i
+const REFUND_ISSUED_PATTERN =
+  /\b(your refund has been issued|your refund was issued|refund issued|refund processed|refund completed|your refund is on the way)\b/i
 const DROP_OFF_BY_PATTERN = /drop\s*off\s*by/i
 
-const ITEM_LABEL_PATTERN = /\bitem(?:\s+title)?\b\s*[:\-]/i
-const ITEM_SECTION_HEADERS = new Set(["item", "item title", "item(s)", "item details"])
+const MONEY_PATTERN = /(?:CAD|CDN)?\s*\$+\s*(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})/i
+const MONEY_CURRENCY_PATTERN = /(?:CAD|CDN)\s*(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})/i
+const ITEM_LABEL_PATTERN = /\bitem(?:\s+title)?\b\s*[:\-]\s*(.+)$/i
+const ITEM_SECTION_MARKERS = [
+  /^item\(s\)\s+in\s+your\s+return\s+request\b/i,
+  /^item(?:\s+returned|\s+to\s+be\s+returned)?\s*:\s*\d+\b/i,
+  /^item\s+details\b/i,
+  /^item\(s\)\b/i,
+] as const
+const ITEM_SECTION_STOP =
+  /\b(return summary|refund summary|feedback|order summary|track your return|learn more|need help)\b/i
 const SUBJECT_ITEM_PREFIXES = [
   /^your refund for\s+/i,
   /^your return of\s+/i,
   /^your return drop-off confirmation for\s+/i,
-]
-const REFUND_BY_PATTERN = /refund will be issued by\s*(.+)$/i
+] as const
+const REFUND_DESTINATION_PATTERNS = [
+  /\b(?:will be|is|was)\s+refunded\s+to\s+(.+)$/i,
+  /\brefund(?:ed)?\s+(?:to|on)\s+(.+)$/i,
+  /\bto\s+(amazon account balance|[a-z ]+ ending in \d{4})\b/i,
+] as const
 const PAYMENT_LAST4_PATTERN = /(?:ending in|last\s*4|card)\s*[:#-]?\s*(\d{4})\b/i
 
 export function parseAmazonReturnEmail(input: AmazonReturnEmailInput): AmazonReturnParseResult | null {
@@ -78,64 +99,75 @@ export function parseAmazonReturnEmail(input: AmazonReturnEmailInput): AmazonRet
     return null
   }
 
-  if (RETURN_REQUEST_SUBJECT.test(subject) || RETURN_REQUEST_SUBJECT.test(text)) {
-    const amount = extractAmountByLabels(text, ["refund amount", "estimated refund", "refund total", "refund subtotal", "total estimated refund"]) ??
-      extractAnyAmount(text)
-    const dropOffBy = extractDropOffBy(text, input.receivedAt)
-    const itemTitle = extractItemTitle(text, subject)
+  const classifier = classifyAmazonTemplate(subject, text)
+  if (!classifier) {
+    return null
+  }
 
-    if (!amount || !dropOffBy || !itemTitle) {
+  const items = extractItems(text, subject)
+  const refundDestinationText = extractRefundDestination(text) ?? undefined
+
+  if (classifier === "amazon.return_requested") {
+    const refundTotalEstimated =
+      extractAmountByLabels(text, [
+        "total estimated refund",
+        "refund subtotal",
+        "estimated refund",
+        "refund total",
+        "refund amount",
+      ]) ?? extractAnyRefundAmount(text)
+    if (refundTotalEstimated === null) {
       return null
     }
 
     return {
       eventType: "amazon.return_requested",
       orderId,
-      amountTotal: amount,
-      dropOffBy,
-      itemTitle,
+      refundTotalEstimated,
+      dropOffBy: extractDropOffBy(text, input.receivedAt),
+      returnMethodOrLocation: extractReturnMethodOrLocation(text) ?? undefined,
+      refundDestinationText,
+      items,
+      statusText: "Your return request is confirmed",
       paymentMethodLast4: extractPaymentMethodLast4(text) ?? undefined,
     }
   }
 
-  if (REFUND_ISSUED_SUBJECT.test(subject) || REFUND_ISSUED_SUBJECT.test(text)) {
-    const refundAmount = extractAmountByLabels(text, ["refund amount", "refund total", "total refund", "refunded"]) ??
-      extractAnyAmount(text)
-    const itemTitle = extractItemTitle(text, subject)
-
-    if (!refundAmount || !itemTitle) {
+  if (classifier === "amazon.refund_issued") {
+    const refundAmountIssued =
+      extractAmountByLabels(text, ["refund amount", "refund total", "total refund", "refund subtotal"]) ??
+      extractAnyRefundAmount(text)
+    if (refundAmountIssued === null) {
       return null
     }
 
     return {
       eventType: "amazon.refund_issued",
       orderId,
-      refundAmount,
-      itemTitle,
+      refundAmountIssued,
+      refundDestinationText,
+      items,
+      statusText: "Refund issued",
     }
   }
 
-  if (RETURN_DROPOFF_SUBJECT.test(subject) || RETURN_DROPOFF_SUBJECT.test(text)) {
-    const estimatedRefund =
-      extractAmountByLabels(text, ["total estimated refund", "refund subtotal", "estimated refund"]) ??
-      extractAnyAmount(text)
-    const itemTitle = extractItemTitle(text, subject)
-    const refundBy = extractRefundBy(text, input.receivedAt)
-
-    if (!estimatedRefund || !itemTitle) {
-      return null
-    }
-
-    return {
-      eventType: "amazon.return_dropped_off",
-      orderId,
-      estimatedRefund,
-      refundBy: refundBy ?? undefined,
-      itemTitle,
-    }
+  const refundTotalEstimated =
+    extractAmountByLabels(text, ["total estimated refund", "refund subtotal", "estimated refund", "refund total"]) ??
+    extractAnyRefundAmount(text)
+  if (refundTotalEstimated === null) {
+    return null
   }
 
-  return null
+  return {
+    eventType: "amazon.return_dropped_off",
+    orderId,
+    refundTotalEstimated,
+    refundDestinationText,
+    items,
+    statusText: text.match(/\byour return is in transit\b/i)
+      ? "Your return is in transit"
+      : "Your return was dropped off",
+  }
 }
 
 export function detectAmazonReturnNearMiss(
@@ -149,17 +181,9 @@ export function detectAmazonReturnNearMiss(
   const subject = input.subject ?? ""
   const combined = `${subject}\n${text}`
   const orderId = extractOrderId(combined) ?? undefined
+  const classifier = classifyAmazonTemplate(subject, text)
 
-  const matchesReturnRequest = RETURN_REQUEST_SUBJECT.test(subject) || RETURN_REQUEST_SUBJECT.test(text)
-  const matchesRefundIssued = REFUND_ISSUED_SUBJECT.test(subject) || REFUND_ISSUED_SUBJECT.test(text)
-  const matchesDropOff = RETURN_DROPOFF_SUBJECT.test(subject) || RETURN_DROPOFF_SUBJECT.test(text)
-
-  if (!matchesReturnRequest && !matchesRefundIssued && !matchesDropOff) {
-    if (!orderId) {
-      return {
-        reason: "unknown_template",
-      }
-    }
+  if (!classifier) {
     return {
       reason: "unknown_template",
       orderId,
@@ -169,85 +193,70 @@ export function detectAmazonReturnNearMiss(
   if (!orderId) {
     return {
       reason: "missing_order_id",
-      expectedEventType: matchesReturnRequest
-        ? "amazon.return_requested"
-        : matchesRefundIssued
-        ? "amazon.refund_issued"
-        : "amazon.return_dropped_off",
+      expectedEventType: classifier,
       missingFields: ["order_id"],
     }
   }
 
-  if (matchesReturnRequest) {
-    const missing: string[] = []
+  if (classifier === "amazon.return_requested") {
     const amount =
-      extractAmountByLabels(text, ["refund amount", "estimated refund", "refund total", "refund subtotal", "total estimated refund"]) ??
-      extractAnyAmount(text)
-    const dropOffBy = extractDropOffBy(text, input.receivedAt)
-    const itemTitle = extractItemTitle(text, subject)
-
-    if (!amount) missing.push("amount_total")
-    if (!dropOffBy) missing.push("drop_off_by")
-    if (!itemTitle) missing.push("item_title")
-
-    if (missing.length === 0) {
+      extractAmountByLabels(text, [
+        "total estimated refund",
+        "refund subtotal",
+        "estimated refund",
+        "refund total",
+        "refund amount",
+      ]) ?? extractAnyRefundAmount(text)
+    if (amount !== null) {
       return null
     }
     return {
       reason: "missing_fields",
       orderId,
-      expectedEventType: "amazon.return_requested",
-      missingFields: missing,
+      expectedEventType: classifier,
+      missingFields: ["refund_total_estimated"],
     }
   }
 
-  if (matchesRefundIssued) {
-    const missing: string[] = []
-    const refundAmount =
-      extractAmountByLabels(text, ["refund amount", "refund total", "total refund", "refunded"]) ??
-      extractAnyAmount(text)
-    const itemTitle = extractItemTitle(text, subject)
-    if (!refundAmount) missing.push("refund_amount")
-    if (!itemTitle) missing.push("item_title")
-    if (missing.length === 0) {
-      return null
-    }
-    return {
-      reason: "missing_fields",
-      orderId,
-      expectedEventType: "amazon.refund_issued",
-      missingFields: missing,
-    }
+  const amount =
+    classifier === "amazon.refund_issued"
+      ? extractAmountByLabels(text, ["refund amount", "refund total", "total refund", "refund subtotal"]) ??
+        extractAnyRefundAmount(text)
+      : extractAmountByLabels(text, ["total estimated refund", "refund subtotal", "estimated refund", "refund total"]) ??
+        extractAnyRefundAmount(text)
+  if (amount !== null) {
+    return null
   }
 
-  if (matchesDropOff) {
-    const missing: string[] = []
-    const estimatedRefund =
-      extractAmountByLabels(text, ["total estimated refund", "refund subtotal", "estimated refund"]) ??
-      extractAnyAmount(text)
-    const itemTitle = extractItemTitle(text, subject)
-    if (!estimatedRefund) missing.push("estimated_refund")
-    if (!itemTitle) missing.push("item_title")
-    if (missing.length === 0) {
-      return null
-    }
-    return {
-      reason: "missing_fields",
-      orderId,
-      expectedEventType: "amazon.return_dropped_off",
-      missingFields: missing,
-    }
+  return {
+    reason: "missing_fields",
+    orderId,
+    expectedEventType: classifier,
+    missingFields: [
+      classifier === "amazon.refund_issued" ? "refund_amount_issued" : "refund_total_estimated",
+    ],
   }
-
-  return null
-}
-
-export function buildAmazonReturnDedupeKey(provider: string, orderId: string, eventType: string): string {
-  return crypto.createHash("md5").update(`${provider}:${orderId}:${eventType}`).digest("hex")
 }
 
 function isAmazonReturnSender(provider: string, fromAddress: string): boolean {
-  return provider.toLowerCase() === "gmail" && AMAZON_FROM.test(fromAddress)
+  void provider
+  return AMAZON_FROM.test(fromAddress)
+}
+
+function classifyAmazonTemplate(
+  subject: string,
+  text: string
+): AmazonReturnParseResult["eventType"] | null {
+  if (RETURN_REQUEST_PATTERN.test(subject) || RETURN_REQUEST_PATTERN.test(text)) {
+    return "amazon.return_requested"
+  }
+  if (REFUND_ISSUED_PATTERN.test(subject) || REFUND_ISSUED_PATTERN.test(text)) {
+    return "amazon.refund_issued"
+  }
+  if (RETURN_DROPPED_OFF_PATTERN.test(subject) || RETURN_DROPPED_OFF_PATTERN.test(text)) {
+    return "amazon.return_dropped_off"
+  }
+  return null
 }
 
 function normalizeContent(content: string): string {
@@ -271,39 +280,39 @@ function extractAmountByLabels(text: string, labels: string[]): number | null {
   const lines = toLines(text)
   for (const line of lines) {
     const lower = line.toLowerCase()
-    if (labels.some((label) => lower.includes(label))) {
-      const amount = extractAmountFromLine(line)
-      if (amount) {
-        return amount
-      }
+    if (!labels.some((label) => lower.includes(label))) {
+      continue
+    }
+    const amount = extractAmountFromLine(line)
+    if (amount !== null) {
+      return amount
     }
   }
   return null
 }
 
-function extractAnyAmount(text: string): number | null {
+function extractAnyRefundAmount(text: string): number | null {
   const lines = toLines(text)
   for (const line of lines) {
+    if (!/\b(refund|subtotal|total)\b/i.test(line)) {
+      continue
+    }
     const amount = extractAmountFromLine(line)
-    if (amount) {
+    if (amount !== null) {
       return amount
     }
   }
-  const compact = text.replace(/\s+/g, " ")
-  return extractAmountFromLine(compact)
+  return null
 }
 
 function extractAmountFromLine(line: string): number | null {
-  const match = line.match(AMOUNT_PATTERN)
+  const compact = line.replace(/\*/g, "").replace(/\^/g, "")
+  const match = compact.match(MONEY_PATTERN) ?? compact.match(MONEY_CURRENCY_PATTERN)
   if (!match) {
     return null
   }
-  const left = match[1]
-  const right = match[2]
-  const dollar = match[3]
-  const cents = match[4]
-  const whole = left ?? dollar
-  const fraction = right ?? cents
+  const whole = match[1]
+  const fraction = match[2]
   if (!whole || !fraction) {
     return null
   }
@@ -326,7 +335,7 @@ function extractDropOffBy(text: string, receivedAt?: Date): string | null {
         return parsedInline
       }
     }
-    const next = findNextMeaningfulLine(lines, i + 1)
+    const next = lines[i + 1]?.trim()
     if (next) {
       const parsedNext = parseAmazonDate(next, receivedAt)
       if (parsedNext) {
@@ -339,7 +348,9 @@ function extractDropOffBy(text: string, receivedAt?: Date): string | null {
 
 function parseAmazonDate(value: string, referenceDate?: Date): string | null {
   const cleaned = value.replace(/\s+/g, " ").trim().replace(/[.]+$/, "")
-  const match = cleaned.match(/^(?:[A-Za-z]{3,9}\.?,?\s+)?(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2})(?:,\s*(\d{4}))?$/i)
+  const match = cleaned.match(
+    /^(?:[A-Za-z]{3,9}\.?,?\s+)?(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2})(?:,\s*(\d{4}))?$/i
+  )
   if (!match) {
     return null
   }
@@ -374,7 +385,6 @@ function inferBestYear(baseYear: number, monthName: string, day: number, referen
     })
     .sort((a, b) => a.deltaDays - b.deltaDays)
 
-  // If tied, prefer near-future dates for operational deadlines.
   const best = candidates[0]
   const close = candidates.find(
     (candidate) =>
@@ -413,62 +423,119 @@ function monthNameToNumber(monthName: string): number | null {
   return map[monthName] ?? null
 }
 
-function extractItemTitle(text: string, subject?: string): string | null {
-  const subjectTitle = subject ? extractItemTitleFromSubject(subject) : null
-  if (subjectTitle) {
-    return subjectTitle
-  }
-
+function extractItems(text: string, subject?: string): AmazonReturnItem[] {
   const lines = toLines(text)
-  for (const line of lines) {
-    if (ITEM_LABEL_PATTERN.test(line)) {
-      const candidate = line.replace(ITEM_LABEL_PATTERN, "").trim()
-      const title = extractTitleFromLine(candidate)
-      if (title) {
-        return title
-      }
-    }
-  }
+  const items: AmazonReturnItem[] = []
+  let inItemSection = false
+  let pendingQty: number | undefined
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]
-    if (ITEM_COUNT_PATTERN.test(line)) {
-      const next = findNextMeaningfulLine(lines, i + 1)
-      if (next) {
-        const title = extractTitleFromLine(next)
-        if (title) {
-          return title
-        }
-      }
+    const inlineTitle = line.match(ITEM_LABEL_PATTERN)?.[1]?.trim()
+    if (inlineTitle) {
+      pushItem(items, inlineTitle)
+      continue
+    }
+
+    if (!inItemSection && ITEM_SECTION_MARKERS.some((pattern) => pattern.test(line))) {
+      inItemSection = true
+      pendingQty = extractQuantity(line) ?? undefined
+      continue
+    }
+
+    if (!inItemSection) {
+      continue
+    }
+    if (ITEM_SECTION_STOP.test(line)) {
+      inItemSection = false
+      pendingQty = undefined
+      continue
+    }
+    if (/^order(?:\s*(?:id|#))?/i.test(line)) {
+      inItemSection = false
+      pendingQty = undefined
+      continue
+    }
+    if (/^item(?:\s+returned|\s+to\s+be\s+returned)?\s*:\s*\d+/i.test(line)) {
+      pendingQty = extractQuantity(line) ?? undefined
+      continue
+    }
+
+    const title = extractTitleFromLine(line)
+    if (!title) {
+      continue
+    }
+    pushItem(items, title, pendingQty)
+    pendingQty = undefined
+  }
+
+  if (items.length === 0 && subject) {
+    const subjectTitle = extractItemTitleFromSubject(subject)
+    if (subjectTitle) {
+      items.push({ title: subjectTitle })
     }
   }
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i].toLowerCase()
-    if (ITEM_SECTION_HEADERS.has(line)) {
-      const next = findNextMeaningfulLine(lines, i + 1)
-      if (next) {
-        const title = extractTitleFromLine(next)
-        if (title) {
-          return title
-        }
+  return items
+}
+
+function pushItem(items: AmazonReturnItem[], rawTitle: string, qty?: number): void {
+  const title = extractTitleFromLine(rawTitle)
+  if (!title) {
+    return
+  }
+  const key = title.trim().toLowerCase()
+  const existing = items.find((item) => item.title.trim().toLowerCase() === key)
+  if (existing) {
+    if (qty && !existing.qty) {
+      existing.qty = qty
+    }
+    return
+  }
+  items.push(qty && qty > 0 ? { title, qty } : { title })
+}
+
+function extractRefundDestination(text: string): string | null {
+  const lines = toLines(text)
+  for (const line of lines) {
+    for (const pattern of REFUND_DESTINATION_PATTERNS) {
+      const match = line.match(pattern)
+      if (!match?.[1]) continue
+      const candidate = normalizeDestination(match[1])
+      if (candidate) {
+        return candidate
       }
     }
   }
-
   return null
 }
 
-function extractRefundBy(text: string, receivedAt?: Date): string | null {
+function normalizeDestination(value: string): string | null {
+  const cleaned = value.replace(/[.]+$/, "").replace(/\s+/g, " ").trim()
+  if (!cleaned) return null
+  return cleaned.length > 120 ? cleaned.slice(0, 120) : cleaned
+}
+
+function extractReturnMethodOrLocation(text: string): string | null {
   const lines = toLines(text)
   for (const line of lines) {
-    const match = line.match(REFUND_BY_PATTERN)
-    if (match?.[1]) {
-      const parsed = parseAmazonDate(match[1], receivedAt)
-      if (parsed) {
-        return parsed
-      }
+    if (!/\b(drop[-\s]*off|return method|return location|bring your package to|take your package to)\b/i.test(line)) {
+      continue
     }
+    const cleaned = line.replace(/\s+/g, " ").trim()
+    return cleaned.length > 160 ? cleaned.slice(0, 160) : cleaned
+  }
+  return null
+}
+
+function extractQuantity(line: string): number | null {
+  const direct = line.match(/:\s*(\d+)\b/)
+  if (direct?.[1]) {
+    return Number(direct[1])
+  }
+  const leading = line.match(/^(\d+)\s*[xX]?\s+/)
+  if (leading?.[1]) {
+    return Number(leading[1])
   }
   return null
 }
@@ -529,6 +596,9 @@ function isMeaningfulTitle(value: string): boolean {
   if (/^order id/i.test(value)) {
     return false
   }
+  if (/^(return|refund)\b/i.test(value) && value.length < 20) {
+    return false
+  }
   return true
 }
 
@@ -537,22 +607,4 @@ function toLines(text: string): string[] {
     .split(/\n/)
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter((line) => line.length > 0)
-}
-
-function findNextMeaningfulLine(lines: string[], start: number): string | null {
-  for (let i = start; i < lines.length; i += 1) {
-    const line = lines[i].trim()
-    if (!line) {
-      continue
-    }
-    if (isLinkOnly(line)) {
-      continue
-    }
-    return line
-  }
-  return null
-}
-
-function isLinkOnly(line: string): boolean {
-  return /^https?:\/\/\S+$/i.test(line) || /^\(https?:\/\/\S+\)$/i.test(line)
 }

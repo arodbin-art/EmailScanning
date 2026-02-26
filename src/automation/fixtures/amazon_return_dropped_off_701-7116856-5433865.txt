@@ -1,0 +1,12 @@
+Hello,
+
+Your return was dropped off.
+Your return is in transit.
+Order #701-7116856-5433865
+Total estimated refund: $35.70
+This amount will be refunded to your Amazon account balance.
+
+Item(s) in your return request
+Item returned: 2
+[USB-C Fast Charger Cable 2m, Braided...](https://www.amazon.ca/gp/product/B0ABC1234)
+[Screen Protector Tempered Glass Kit...](https://www.amazon.ca/gp/product/B0XYZ9876)

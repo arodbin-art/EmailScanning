@@ -1,12 +1,13 @@
 # signal-engine
 
-Last updated: 2026-02-22
+Last updated: 2026-02-26
 Status: IN PROGRESS
 
 ## NEXT
 - [ ] 1. Configure/verify `moneyrecovery_person_code` on all active Amazon/Manulife mail accounts
 - [ ] 2. Refresh Gmail OAuth token for account `id=1` (`invalid_grant`) and re-run live ingestion
 - [x] 3. Autonomous ingest+delivery scheduler + Manulife integration completed
+- [ ] 4. Replace static/session tokens with proper service auth (`RVI` client credentials + official iGPT server credential)
 
 ## Tracker Format (Codex)
 Required file shape for tracker compatibility:
@@ -14,6 +15,140 @@ Required file shape for tracker compatibility:
 - Keep one primary `Status: ...` line near the top.
 - Keep immediate tasks under `## NEXT` using markdown checkboxes.
 - Use unchecked items for pending actions and checked items for completed actions.
+
+## 2026-02-26 - Vault cutover for local secrets/config
+Status: COMPLETE
+- Added iGPT Vault mappings for runtime injection:
+  - `IGPT_API_KEY=signal-engine/dev/igpt_api_key`
+  - `IGPT_SESSION_TOKEN=signal-engine/dev/igpt_session_token`
+  - `IGPT_SESSION_DEVICE_ID=signal-engine/dev/igpt_session_device_id`
+  - `IGPT_SESSION_USER_ID=signal-engine/dev/igpt_session_user_id`
+- Updated vault wrappers to auto-source `/home/rod/.config/vaultsolution/vault.env` (main service + admin API).
+- Added admin UI vault wrapper and scripts:
+  - `email-scanning-admin/ui/scripts/run_with_hcv.sh`
+  - `npm run dev:vault|build:vault|preview:vault` (UI package)
+- Updated systemd templates to run vault-backed commands:
+  - `ops/systemd/email-scanning.service` -> `npm run run:scheduled:vault`
+  - `ops/systemd/signal-engine-poll.service` -> `npm run poll:vault`
+  - both templates now set `VAULT_ENV_FILE=/home/rod/.config/vaultsolution/vault.env`
+- Migrated local plaintext secret files into centralized runtime storage and left compatibility symlinks:
+  - target: `/media/nas/workspaces/vaultSolution/runtime/email-scanning/`
+  - moved files include `.admin_token`, `gmail_tokens.json`, `rvi.bearertoken`, `openai.key`, iGPT key files, and OAuth client JSON.
+- Sanitized local `.env` files by clearing secret values so runtime now relies on Vault injection.
+
+## 2026-02-22 - Amazon lifecycle completion (dropped-off + refund-issued pending verification)
+Status: COMPLETE
+- Hardened Amazon parser to classify and extract deterministic order-level payloads for:
+  - `amazon.return_requested`
+  - `amazon.return_dropped_off`
+  - `amazon.refund_issued`
+- Added nested `amazon` payload contract with optional `items[]`, destination text, and status text.
+- Updated Amazon dedupe usage to include order + primary amount + received date.
+- Updated delivery translator to:
+  - resolve one or many RVIs by external order reference (`rvi_ids`)
+  - keep candidate fallback + auto-create behavior
+  - call `PATCH /return-flows/:id/refund-detected` for `amazon.refund_issued` (no immediate close)
+- Added parser fixtures + tests for:
+  - request-confirmed sample (`702-3272715-0390601`, `31.12`, deadline Feb 2)
+  - dropped-off sample (`701-7116856-5433865`, `35.70`)
+- Validation completed:
+  - `npm run build`
+  - `npm run test:amazon`
+  - `npm run test:delivery:money-recovery`
+
+Deployment (2026-02-24):
+- Built and pushed image:
+  - `emailscanacr354705.azurecr.io/signal-engine:manual-amazon-lifecycle-20260223-234542`
+- Updated Container Apps Jobs:
+  - `signal-engine-dev`
+  - `signal-engine-deliver-dev`
+- Manual execution verification:
+  - `signal-engine-dev-7w1dc50` => `Succeeded`
+  - `signal-engine-deliver-dev-9f126m4` => `Succeeded`
+
+## 2026-02-26 - iGPT shadow-mode parallel intelligence
+Status: COMPLETE
+- Added `EmailIntelligenceProvider` abstraction with:
+  - deterministic wrapper provider (`src/intelligence/deterministicProvider.ts`)
+  - iGPT provider (`src/intelligence/igptProvider.ts`)
+- Ingestion now runs deterministic + iGPT analysis in parallel shadow flow per email, then:
+  - emits deterministic events exactly as before
+  - persists iGPT-only candidates to `email_scanning.ai_candidate_events`
+  - never emits iGPT candidates to `events_outbox`
+- Added resilient guardrails:
+  - `IGPT_ENABLED=false` default
+  - iGPT failures are non-blocking for ingestion
+  - structured log emitted: `stage=igpt_shadow`, deterministic and iGPT counts
+- Added comparison CLI:
+  - `npm run compare:intelligence -- --since-days 14`
+- Added tests:
+  - `npm run test:igpt`
+  - `npm run test:intelligence:shadow`
+- Added migration:
+  - `prisma/migrations/20260226091500_add_ai_candidate_events/migration.sql`
+- Azure dev rollout:
+  - built/pushed `emailscanacr354705.azurecr.io/signal-engine:manual-igpt-shadow-20260226-054141`
+  - updated jobs `signal-engine-dev` + `signal-engine-deliver-dev` to new image
+  - enabled ingestion env: `IGPT_ENABLED=true`, `IGPT_BASE_URL=https://api.igpt.ai`, `IGPT_TIMEOUT_MS=5000`
+  - manual ingestion run `signal-engine-dev-7ih41nw` succeeded but processed 0 emails due `invalid_grant`
+  - iGPT candidate rows remain 0 until Gmail auth and `IGPT_API_KEY` are configured
+
+## 2026-02-26 - iGPT auth hardening + autonomous fallback
+Status: COMPLETE
+- Implemented iGPT shadow fallback path in `IGPTProvider`:
+  - if iGPT returns auth/empty/fetch error and `IGPT_FALLBACK_ENABLED=true`, provider uses Azure OpenAI to produce shadow `StructuredSignal[]` for Amazon/Manulife-like emails.
+  - still no writes to `events_outbox`; candidates only persist to `ai_candidate_events`.
+- Added test coverage:
+  - `testAuthErrorFallsBackToAzureOpenAi` in `src/intelligence/igptProviderTest.ts`.
+- Azure dev updated:
+  - image: `emailscanacr354705.azurecr.io/signal-engine:manual-igpt-fallback-20260226-074551`
+  - env: `IGPT_FALLBACK_ENABLED=true`
+- Validation:
+  - Gmail `invalid_grant` resolved (Azure ingestion now processes emails again).
+  - latest run had only existing emails (`new_emails=0`), so no new shadow candidates were generated in that cycle.
+
+## 2026-02-26 - iGPT shadow backfill tool for stored emails
+Status: COMPLETE
+- Added historical backfill CLI:
+  - `src/analysis/backfillAiCandidates.ts`
+  - `npm run backfill:intelligence -- --since-days 14 --limit 200 [--dry-run]`
+- Behavior:
+  - loads stored normalized email text from object storage
+  - runs iGPT provider in shadow mode and persists to `email_scanning.ai_candidate_events`
+  - never emits to `events_outbox`
+  - skips already-processed emails by default; supports `--force`
+- Validation:
+  - `npm run build`
+  - `npm run test:igpt`
+  - `npm run test:intelligence:shadow`
+  - dry run: `npm run backfill:intelligence -- --since-days 14 --limit 20 --dry-run`
+    - result: `scanned=20`, `processed=20`, `failed=0`, `candidate_signals=0` (expected while iGPT auth remains failing)
+
+## 2026-02-26 - iGPT shadow backfill hardening + targeted fallback run
+Status: COMPLETE
+- Hardened `src/analysis/backfillAiCandidates.ts`:
+  - `--object-timeout-ms` flag (default `20000`) to prevent indefinite blob read hangs.
+  - `--amazon-manulife-only` flag to focus candidate generation on likely relevant emails.
+- Validation run (fallback path enabled with Azure OpenAI config, while iGPT key still auth-failing):
+  - `--since-days 365 --limit 200 --provider gmail --force --amazon-manulife-only --object-timeout-ms 10000`
+  - result: `scanned=43`, `processed=43`, `failed=0`, `candidate_signals=4`, `persisted_signals=4`
+- Post-run verification:
+  - `ai_candidate_events` total rows: `4`
+  - `npm run compare:intelligence -- --since-days 365`:
+    - `total_emails=11`, `deterministic_only=7`, `ai_only=3`, `match_count=1`, `mismatch_count=0`
+
+## 2026-02-26 - Secrets/config migrated to vaultSolution runtime
+Status: COMPLETE
+- Cutover completed to centralized vault runtime env:
+  - `.env` -> `/media/nas/workspaces/vaultSolution/runtime/projects/EmailScanning/.env.runtime`
+  - `email-scanning-admin/api/.env` -> same runtime file
+  - `email-scanning-admin/ui/.env` -> same runtime file
+- Added helper and guard:
+  - `scripts/use-vault-env.sh`
+  - `npm run verify:secrets`
+- Validation:
+  - `npm run backfill:intelligence -- --since-days 14 --limit 20 --dry-run` succeeded.
+  - `vaultSolution/bin/vaultctl verify` passed.
 
 Start timestamp: 2026-01-30T03:03:17Z
 
