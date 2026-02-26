@@ -27,6 +27,7 @@
     "test:igpt": "tsc -p tsconfig.json && node --no-warnings dist/intelligence/igptProviderTest.js",
     "test:intelligence:shadow": "tsc -p tsconfig.json && node --no-warnings dist/intelligence/shadowRuntimeTest.js",
     "test:ingestion:entrypoint": "tsc -p tsconfig.json && node --no-warnings dist/ingestion/indexTest.js",
+    "test:delivery:auth": "tsc -p tsconfig.json && node --no-warnings dist/delivery/authTokenProviderTest.js",
     "test:delivery:money-recovery": "tsc -p tsconfig.json && node --no-warnings dist/delivery/moneyRecoveryClientTest.js",
     "poll:vault": "./ops/vault/run_with_hcv.sh ./ops/vault/hcv-main.envmap -- node --no-warnings ./dist/ingestion/index.js",
     "deliver:vault": "./ops/vault/run_with_hcv.sh ./ops/vault/hcv-main.envmap -- node --no-warnings ./dist/delivery/index.js",

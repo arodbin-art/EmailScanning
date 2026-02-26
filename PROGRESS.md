@@ -7,7 +7,7 @@ Status: IN PROGRESS
 - [ ] 1. Configure/verify `moneyrecovery_person_code` on all active Amazon/Manulife mail accounts
 - [ ] 2. Refresh Gmail OAuth token for account `id=1` (`invalid_grant`) and re-run live ingestion
 - [x] 3. Autonomous ingest+delivery scheduler + Manulife integration completed
-- [ ] 4. Replace static/session tokens with proper service auth (`RVI` client credentials + official iGPT server credential)
+- [x] 4. Replace static/session tokens with proper service auth (`RVI` client credentials + official iGPT server credential)
 
 ## Tracker Format (Codex)
 Required file shape for tracker compatibility:
@@ -35,6 +35,21 @@ Status: COMPLETE
   - target: `/media/nas/workspaces/vaultSolution/runtime/email-scanning/`
   - moved files include `.admin_token`, `gmail_tokens.json`, `rvi.bearertoken`, `openai.key`, iGPT key files, and OAuth client JSON.
 - Sanitized local `.env` files by clearing secret values so runtime now relies on Vault injection.
+
+## 2026-02-26 - Proper service auth default cutover
+Status: COMPLETE
+- Delivery auth now defaults to Entra client credentials:
+  - `RVI_AUTH_MODE=client_credentials` as default behavior.
+  - static bearer path requires explicit emergency opt-in: `RVI_STATIC_BEARER_ALLOW=true`.
+- Runtime vault injection now maps:
+  - `RVI_AUTH_CLIENT_SECRET=signal-engine/dev/graph_client_secret`
+  - removed default mapping of `RVI_BEARER_TOKEN`.
+- iGPT auth defaults to service API key mode:
+  - `IGPT_AUTH_MODE=api_key` default.
+  - `auto` mode uses session fallback only when `IGPT_SESSION_FALLBACK_ENABLED=true`.
+  - removed default runtime injection of iGPT session token/device/user.
+- Validation:
+  - Entra client-credentials token mint successful for MoneyRecovery API (`aud=api://a6167d86-539d-425d-8c6e-0d464d90ec07`, app role present).
 
 ## 2026-02-22 - Amazon lifecycle completion (dropped-off + refund-issued pending verification)
 Status: COMPLETE

@@ -218,6 +218,7 @@ async function testAutoModeFallsBackToSessionAfterApiAuth(): Promise<void> {
   process.env.IGPT_AUTH_MODE = "auto"
   process.env.IGPT_API_KEY = "api-key"
   process.env.IGPT_BASE_URL = "https://api.igpt.ai"
+  process.env.IGPT_SESSION_FALLBACK_ENABLED = "true"
   process.env.IGPT_SESSION_TOKEN = "session-token"
   process.env.IGPT_SESSION_DEVICE_ID = "device-1"
   process.env.IGPT_SESSION_BASE_URL = "https://igpt.ai/api/v1"
@@ -266,12 +267,44 @@ async function testAutoModeFallsBackToSessionAfterApiAuth(): Promise<void> {
   assert(result[0].eventType === "manulife.claim_paid", "session signal should be parsed")
 }
 
+async function testAutoModeSkipsSessionWithoutFallbackFlag(): Promise<void> {
+  const original = snapshotEnv()
+  process.env.IGPT_ENABLED = "true"
+  process.env.IGPT_AUTH_MODE = "auto"
+  process.env.IGPT_API_KEY = "api-key"
+  process.env.IGPT_BASE_URL = "https://api.igpt.ai"
+  process.env.IGPT_SESSION_FALLBACK_ENABLED = "false"
+  process.env.IGPT_SESSION_TOKEN = "session-token"
+  process.env.IGPT_SESSION_DEVICE_ID = "device-1"
+  process.env.IGPT_SESSION_BASE_URL = "https://igpt.ai/api/v1"
+  process.env.IGPT_FALLBACK_ENABLED = "false"
+
+  const calls: string[] = []
+  const provider = new IGPTProvider({
+    fetchImpl: (async (url: any) => {
+      const u = String(url)
+      calls.push(u)
+      return {
+        ok: true,
+        json: async () => ({ error: "auth" }),
+      } as any
+    }) as any,
+  })
+
+  const result = await provider.analyzeEmail(sampleEmail)
+  restoreEnv(original)
+
+  assert(calls.length === 1, "auto mode should only call api endpoint when session fallback disabled")
+  assert(result.length === 0, "auto mode should return empty when api fails and no fallback")
+}
+
 function snapshotEnv(): Record<string, string | undefined> {
   return {
     IGPT_ENABLED: process.env.IGPT_ENABLED,
     IGPT_AUTH_MODE: process.env.IGPT_AUTH_MODE,
     IGPT_API_KEY: process.env.IGPT_API_KEY,
     IGPT_BASE_URL: process.env.IGPT_BASE_URL,
+    IGPT_SESSION_FALLBACK_ENABLED: process.env.IGPT_SESSION_FALLBACK_ENABLED,
     IGPT_SESSION_TOKEN: process.env.IGPT_SESSION_TOKEN,
     IGPT_SESSION_DEVICE_ID: process.env.IGPT_SESSION_DEVICE_ID,
     IGPT_SESSION_BASE_URL: process.env.IGPT_SESSION_BASE_URL,
@@ -302,6 +335,7 @@ async function main() {
   await testAuthErrorFallsBackToAzureOpenAi()
   await testSessionModeReturnsSignalsFromOutputJson()
   await testAutoModeFallsBackToSessionAfterApiAuth()
+  await testAutoModeSkipsSessionWithoutFallbackFlag()
   console.log("igptProviderTest ok")
 }
 

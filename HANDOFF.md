@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-26T09:35:10Z
+Last updated: 2026-02-26T23:47:57Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -39,7 +39,10 @@ Last updated: 2026-02-26T09:35:10Z
   - image: `emailscanacr354705.azurecr.io/signal-engine:manual-igpt-fallback-20260226-074551`
 - iGPT auth status:
   - direct API-key endpoint (`https://api.igpt.ai/v1/recall/ask`) still returns `{"error":"auth"}` for tested `ak:` keys.
-  - session-mode fallback (`x-token` + `x-deviceId`) is implemented and now stored in HCV:
+  - session-mode fallback (`x-token` + `x-deviceId`) is implemented as emergency-only path:
+    - default runtime mode now stays `IGPT_AUTH_MODE=api_key`
+    - `auto` mode only uses session fallback when `IGPT_SESSION_FALLBACK_ENABLED=true`
+  - session credentials are stored in HCV for break-glass use:
     - `signal-engine/dev/igpt_session_token`
     - `signal-engine/dev/igpt_session_device_id`
     - `signal-engine/dev/igpt_session_user_id`
@@ -66,6 +69,9 @@ Last updated: 2026-02-26T09:35:10Z
 - Event payloads are now standardized with deterministic dedupe keys based on provider + mail account + event type + primary reference + amount + date.
 - Delivery now supports both Amazon and Manulife event families.
 - Delivery auth supports unattended Entra client-credentials token minting (`RVI_AUTH_MODE=client_credentials`) with v2->v1 fallback.
+- Delivery auth defaults to `client_credentials`; static bearer mode is blocked unless `RVI_STATIC_BEARER_ALLOW=true`.
+- Runtime vault mapping now injects `RVI_AUTH_CLIENT_SECRET` and no longer injects `RVI_BEARER_TOKEN` by default.
+- iGPT runtime defaults to service key mode (`IGPT_AUTH_MODE=api_key`); session fallback only runs when `IGPT_SESSION_FALLBACK_ENABLED=true`.
 - External reference source normalized to `email_scanning` (with backward lookup fallback for `signal-engine`).
 - Added unified NAS scheduled runner (`npm run run:scheduled:vault`) with systemd units:
   - `ops/systemd/email-scanning.service`
@@ -134,9 +140,16 @@ Last updated: 2026-02-26T09:35:10Z
 - Requires:
 - DATABASE_URL (same as ingestion)
 - RVI_BASE_URL (MoneyRecovery API base)
-- RVI_BEARER_TOKEN (MoneyRecovery JWT, currently obtained via UI localStorage authToken)
+- RVI_AUTH_MODE=client_credentials
+- RVI_AUTH_TENANT_ID
+- RVI_AUTH_CLIENT_ID
+- RVI_AUTH_CLIENT_SECRET
+- RVI_AUTH_RESOURCE=api://<money-recovery-api-app-id>
 - RVI_DELIVERY_KIND=money_recovery
-- If `RVI_BEARER_TOKEN` is invalid/expired, events remain `pending` (401s are treated as retryable).
+- Static bearer mode is emergency-only:
+  - `RVI_AUTH_MODE=static`
+  - `RVI_BEARER_TOKEN=<jwt>`
+  - `RVI_STATIC_BEARER_ALLOW=true`
 
 ## Key commands
 - Ingestion poll: node dist/ingestion/index.js --provider gmail --limit 20

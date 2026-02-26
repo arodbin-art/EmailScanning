@@ -1,4 +1,5 @@
 type TokenProvider = () => Promise<string | undefined>
+type DeliveryAuthMode = "client_credentials" | "static"
 
 type CachedToken = {
   token: string
@@ -8,7 +9,17 @@ type CachedToken = {
 const CLOCK_SKEW_MS = 2 * 60 * 1000
 
 export function createDeliveryTokenProviderFromEnv(): TokenProvider | undefined {
-  const mode = (process.env.RVI_AUTH_MODE ?? "").trim().toLowerCase()
+  const mode = readDeliveryAuthMode(process.env.RVI_AUTH_MODE)
+  const staticAllowed = isTrue(process.env.RVI_STATIC_BEARER_ALLOW)
+
+  if (mode === "static") {
+    if (!staticAllowed) {
+      throw new Error(
+        "RVI static bearer mode is disabled by default. Set RVI_STATIC_BEARER_ALLOW=true only for emergency fallback."
+      )
+    }
+    return undefined
+  }
 
   const tenantId =
     process.env.RVI_AUTH_TENANT_ID?.trim() ||
@@ -29,15 +40,14 @@ export function createDeliveryTokenProviderFromEnv(): TokenProvider | undefined 
     inferResourceFromBearerToken(process.env.RVI_BEARER_TOKEN) ||
     inferResourceFromBaseUrl()
 
-  const hasClientCreds = Boolean(tenantId && clientId && clientSecret && resource)
-  const useClientCreds = mode === "client_credentials" || (!mode && hasClientCreds)
-  if (!useClientCreds) {
-    return undefined
-  }
-
   if (!tenantId || !clientId || !clientSecret || !resource) {
+    const missing: string[] = []
+    if (!tenantId) missing.push("RVI_AUTH_TENANT_ID (or ENTRA/GRAPH tenant id)")
+    if (!clientId) missing.push("RVI_AUTH_CLIENT_ID (or ENTRA/GRAPH client id)")
+    if (!clientSecret) missing.push("RVI_AUTH_CLIENT_SECRET (or ENTRA/GRAPH client secret)")
+    if (!resource) missing.push("RVI_AUTH_RESOURCE (or ENTRA_API_SCOPE/API client id)")
     throw new Error(
-      "RVI client-credentials auth requires tenant/client/secret/resource env vars"
+      `RVI client-credentials auth requires: ${missing.join(", ")}`
     )
   }
 
@@ -48,6 +58,16 @@ export function createDeliveryTokenProviderFromEnv(): TokenProvider | undefined 
     resource,
   })
   return () => fetcher.getToken()
+}
+
+function readDeliveryAuthMode(raw: string | undefined): DeliveryAuthMode {
+  const value = (raw ?? "client_credentials").trim().toLowerCase()
+  if (value === "static") return "static"
+  return "client_credentials"
+}
+
+function isTrue(value: string | undefined): boolean {
+  return (value ?? "").trim().toLowerCase() === "true"
 }
 
 class EntraClientCredentialsTokenProvider {

@@ -21,6 +21,7 @@ export class IGPTProvider implements EmailIntelligenceProvider {
     }
 
     const authMode = getIGPTAuthMode(process.env.IGPT_AUTH_MODE)
+    const allowSessionFallback = isTrue(process.env.IGPT_SESSION_FALLBACK_ENABLED)
     const reasons: string[] = []
 
     if (authMode !== "session") {
@@ -37,6 +38,10 @@ export class IGPTProvider implements EmailIntelligenceProvider {
           raw: apiResult.raw,
         })
       }
+    }
+
+    if (authMode === "auto" && !allowSessionFallback) {
+      return this.tryFallback(email, { reason: reasons[reasons.length - 1] ?? "igpt_empty" })
     }
 
     const sessionResult = await this.analyzeWithSessionToken(email)
@@ -272,11 +277,18 @@ function clampTimeout(value: string | undefined): number {
 }
 
 function getIGPTAuthMode(raw: string | undefined): IGPTAuthMode {
-  const value = (raw ?? "auto").trim().toLowerCase()
+  const value = (raw ?? "api_key").trim().toLowerCase()
   if (value === "api_key" || value === "session") {
     return value
   }
-  return "auto"
+  if (value === "auto") {
+    return "auto"
+  }
+  return "api_key"
+}
+
+function isTrue(value: string | undefined): boolean {
+  return (value ?? "").trim().toLowerCase() === "true"
 }
 
 type AzureFallbackConfig = {

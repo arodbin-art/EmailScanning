@@ -59,9 +59,10 @@ Behavior:
 Optional comparison path that runs in parallel with deterministic parsing:
 
 - `IGPT_ENABLED=false` (default)
-- `IGPT_AUTH_MODE=auto` (default; try API key then session)
+- `IGPT_AUTH_MODE=api_key` (default; service key only)
 - `IGPT_API_KEY=...`
 - `IGPT_BASE_URL=https://api.igpt.ai`
+- `IGPT_SESSION_FALLBACK_ENABLED=false` (default; when `true`, `auto` mode may use session fallback)
 - `IGPT_SESSION_TOKEN=...`
 - `IGPT_SESSION_DEVICE_ID=...`
 - `IGPT_SESSION_BASE_URL=https://igpt.ai/api/v1`
@@ -102,18 +103,20 @@ Required:
 - `RVI_DELIVERY_KIND=money_recovery`
 
 Auth options:
-1. Static token:
-   - `RVI_AUTH_MODE=static`
-   - `RVI_BEARER_TOKEN=<jwt>`
-2. Client credentials (preferred):
+1. Client credentials (default):
    - `RVI_AUTH_MODE=client_credentials`
    - `RVI_AUTH_TENANT_ID`
    - `RVI_AUTH_CLIENT_ID`
    - `RVI_AUTH_CLIENT_SECRET`
    - `RVI_AUTH_RESOURCE=api://<money-recovery-api-app-id>`
+2. Static token (emergency fallback only):
+   - `RVI_AUTH_MODE=static`
+   - `RVI_BEARER_TOKEN=<jwt>`
+   - `RVI_STATIC_BEARER_ALLOW=true`
 
 Notes:
-- Delivery token minting uses OAuth client credentials (not Azure CLI tokens).
+- Delivery defaults to OAuth client credentials (not Azure CLI tokens).
+- Static bearer mode is blocked unless `RVI_STATIC_BEARER_ALLOW=true`.
 - Worker auto-refreshes tokens before expiry.
 
 ## Delivery behavior
