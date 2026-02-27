@@ -4,10 +4,34 @@ Last updated: 2026-02-27
 Status: IN PROGRESS
 
 ## NEXT
+- [x] 0. Template registry (file-based) implemented for Admin Hub monitor creation
 - [ ] 1. Configure/verify `moneyrecovery_person_code` on all active Amazon/Manulife mail accounts
 - [ ] 2. Refresh Gmail OAuth token for account `id=1` (`invalid_grant`) and re-run live ingestion
 - [x] 3. Autonomous ingest+delivery scheduler + Manulife integration completed
 - [x] 4. Replace static/session tokens with proper service auth (`RVI` client credentials + official iGPT server credential)
+
+## 2026-02-27 - Admin template registry (file-based)
+Status: COMPLETE
+- Replaced hardcoded monitor template buttons with a file-based template registry:
+  - `email-scanning-admin/api/templates/templates.json`
+  - templates included: `amazon-default`, `manulife-claims`, `durham-orthodontics-approved-payment`
+- Added Admin API endpoints:
+  - `GET /api/templates` (summary list)
+  - `GET /api/templates/:id` (full template)
+- Added runtime template loading with mtime cache + validation:
+  - duplicate `id` blocked
+  - missing `monitor_defaults.provider` blocked
+  - clear `500` error when registry is missing/invalid
+- Added Admin UI templates page:
+  - `/admin/templates` shows list + read-only details
+  - Durham template includes warning: `Requires parser orthodontics.payment_approved`
+- Updated monitor creation UX:
+  - `/admin/monitors` now uses `Create from template`
+  - selected template pre-fills `/admin/monitors/new` form
+  - manual flow retained as `Create blank monitor`
+- Added minimal tests:
+  - API registry load/validation test (`email-scanning-admin/api/src/templates.test.ts`)
+  - UI prefill mapping test (`email-scanning-admin/ui/src/utils/templatePrefillTest.ts`)
 
 ## 2026-02-27 - Manulife AI review score surfaced end-to-end
 Status: COMPLETE

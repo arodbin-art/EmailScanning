@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiRequest } from '../utils/api';
-import { MailAccount, Monitor } from '../utils/types';
+import { MailAccount, Monitor, TemplateSummary } from '../utils/types';
 
 function summarizeMonitor(monitor: Monitor) {
   const rules: string[] = [];
@@ -58,6 +58,8 @@ function looksLikeAmazonMonitor(monitor: Monitor): boolean {
 export default function MonitorsPage() {
   const [monitors, setMonitors] = useState<Monitor[]>([]);
   const [mailAccounts, setMailAccounts] = useState<MailAccount[]>([]);
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const navigate = useNavigate();
@@ -65,11 +67,16 @@ export default function MonitorsPage() {
   const loadData = () => {
     Promise.all([
       apiRequest<Monitor[]>('/api/monitors'),
-      apiRequest<MailAccount[]>('/api/mail-accounts')
+      apiRequest<MailAccount[]>('/api/mail-accounts'),
+      apiRequest<TemplateSummary[]>('/api/templates')
     ])
-      .then(([monitorRes, mailRes]) => {
+      .then(([monitorRes, mailRes, templateRes]) => {
         setMonitors(monitorRes.data);
         setMailAccounts(mailRes.data);
+        setTemplates(templateRes.data);
+        if (!selectedTemplate && templateRes.data.length > 0) {
+          setSelectedTemplate(templateRes.data[0].id);
+        }
         setWarnings(monitorRes.warnings?.map((warning) => warning.message) ?? []);
       })
       .catch((err) => setError(err.message));
@@ -132,73 +139,12 @@ export default function MonitorsPage() {
     }
   };
 
-  const createAmazonTemplate = async () => {
-    setError(null);
-    try {
-      await apiRequest('/api/monitors', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: 'Amazon Returns Template',
-          enabled: true,
-          provider: 'gmail',
-          scope: 'all',
-          mail_account_ids: [],
-          sender_rules: null,
-          from_contains: 'return@amazon.ca',
-          subject_contains: null,
-          subject_regex: 'return request is confirmed|refund|return drop-off confirmation',
-          body_regex: null,
-          has_attachments: null,
-          gmail_label: null,
-          ai_prompt_template: null,
-          confidence_threshold: 0.9,
-          allowed_event_types: [
-            'amazon.return_requested',
-            'amazon.return_dropped_off',
-            'amazon.refund_issued'
-          ]
-        })
-      });
-      loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create Amazon template');
+  const createFromTemplate = () => {
+    if (!selectedTemplate) {
+      setError('Select a template first.');
+      return;
     }
-  };
-
-  const createManulifeTemplate = async () => {
-    setError(null);
-    try {
-      await apiRequest('/api/monitors', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: 'Manulife Claims Template',
-          enabled: true,
-          provider: 'gmail',
-          scope: 'all',
-          mail_account_ids: [],
-          sender_rules: null,
-          from_contains: 'manulife',
-          subject_contains: null,
-          subject_regex: 'claim|reimbursement|benefit',
-          body_regex: null,
-          has_attachments: null,
-          gmail_label: null,
-          ai_prompt_template: null,
-          confidence_threshold: 0.85,
-          allowed_event_types: [
-            'manulife.claim_received',
-            'manulife.claim_processed',
-            'manulife.claim_paid',
-            'manulife.claim_denied',
-            'manulife.claim_info_required',
-            'manulife.claim_status_update'
-          ]
-        })
-      });
-      loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create Manulife template');
-    }
+    navigate(`/admin/monitors/new?template=${encodeURIComponent(selectedTemplate)}`);
   };
 
   const deleteMonitor = async (id: string) => {
@@ -216,14 +162,26 @@ export default function MonitorsPage() {
       <div className="page-header">
         <h1 className="page-title">Monitors</h1>
         <div className="button-group">
-          <button className="button secondary" onClick={createAmazonTemplate}>
-            Add Amazon Template
+          <select
+            className="select"
+            value={selectedTemplate}
+            onChange={(event) => setSelectedTemplate(event.target.value)}
+          >
+            <option value="">Select template</option>
+            {templates.map((template) => (
+              <option value={template.id} key={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </select>
+          <button className="button secondary" onClick={createFromTemplate}>
+            Create from template
           </button>
-          <button className="button secondary" onClick={createManulifeTemplate}>
-            Add Manulife Template
+          <button className="button ghost" onClick={() => navigate('/admin/templates')}>
+            View templates
           </button>
           <button className="button" onClick={() => navigate('/admin/monitors/new')}>
-            Create Monitor
+            Create blank monitor
           </button>
         </div>
       </div>

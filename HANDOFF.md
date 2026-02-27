@@ -90,7 +90,11 @@ Last updated: 2026-02-27T05:23:30Z
 - Systemd timer `email-scanning.timer` is installed and active (15-minute cadence).
 - Legacy `signal-engine-poll.timer` disabled to avoid duplicate poll runs.
 - Current ingestion blocker on NAS: Gmail OAuth refresh returns `invalid_grant` for mail account `id=1`; delivery still runs.
-- Admin UI now includes monitor template buttons (Amazon + Manulife) and event family filters on `/admin/events`.
+- Admin UI monitor templates are now registry-driven from `email-scanning-admin/api/templates/templates.json`:
+  - `/admin/templates` lists registry templates and details.
+  - `/admin/monitors` uses `Create from template` instead of hardcoded add buttons.
+  - Includes `amazon-default`, `manulife-claims`, and `durham-orthodontics-approved-payment`.
+- Event family filters remain available on `/admin/events`.
 - Admin Events page now shows Manulife AI review summary and detail values (`baselineScore`, `igptScore`, `flags`, `rationale`).
 - Azure deployment completed for this change set:
   - `signal-engine` image: `emailscanacr354705.azurecr.io/signal-engine:manual-manulife-ai-review-20260227-051213`

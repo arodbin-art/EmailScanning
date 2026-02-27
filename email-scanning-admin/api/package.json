@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --no-warnings --loader ts-node/esm src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "test:templates": "node --test --no-warnings --loader ts-node/esm src/templates.test.ts src/templates.routes.test.ts",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate --schema ./prisma/schema.prisma",
     "start:vault": "./scripts/run_with_hcv.sh node dist/index.js",
@@ -23,7 +24,9 @@
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.2",
+    "@types/supertest": "^6.0.3",
     "prisma": "^5.22.0",
+    "supertest": "^7.1.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"
   },

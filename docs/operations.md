@@ -176,9 +176,39 @@ npm run deliver:backfill:amazon
 ```
 
 ## Monitor templates (Admin Hub)
-In `Monitors`:
-- `Add Amazon Template`
-- `Add Manulife Template`
+Templates are now data-driven from:
+- `email-scanning-admin/api/templates/templates.json`
+
+Admin UI:
+- `Monitors`:
+  - `Create from template` selects a registry template and opens prefilled monitor create form.
+  - `Create blank monitor` keeps manual flow.
+- `Templates` (`/admin/templates`):
+  - list template metadata
+  - view read-only `monitor_defaults`
+
+Template registry notes:
+- required fields per template:
+  - `id` (unique)
+  - `name`
+  - `description`
+  - `tags`
+  - `version`
+  - `monitor_defaults.provider`
+- optional monitor defaults:
+  - `sender_rules`
+  - `subject_regex`
+  - `body_regex`
+  - `event_family_prefixes`
+  - `enabled`
+- API validates the file at runtime and returns clear `500` errors if the file is missing or invalid.
+
+How to add a template:
+1. Edit `email-scanning-admin/api/templates/templates.json`.
+2. Add a new entry under `templates[]` with a unique `id`.
+3. Save; API reloads on next request (mtime cache).
+4. Open `/admin/templates` to verify.
+5. Use `/admin/monitors` -> `Create from template`.
 
 In `Events`:
 - filter by status

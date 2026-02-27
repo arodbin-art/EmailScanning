@@ -46,3 +46,22 @@ export type SignalEvent = {
   delivered_at: string | null;
   rvi_response: unknown | null;
 };
+
+export type TemplateSummary = {
+  id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  version: string;
+};
+
+export type MonitorTemplate = TemplateSummary & {
+  monitor_defaults: {
+    provider: string;
+    sender_rules?: string[] | null;
+    subject_regex?: string | null;
+    body_regex?: string | null;
+    event_family_prefixes?: string[] | null;
+    enabled?: boolean;
+  };
+};

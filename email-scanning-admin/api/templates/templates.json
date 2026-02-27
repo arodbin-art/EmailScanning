@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "amazon-default",
+      "name": "Amazon (returns lifecycle)",
+      "description": "Return requested, dropped off, refund issued",
+      "tags": ["amazon", "returns"],
+      "version": "1.0.0",
+      "monitor_defaults": {
+        "provider": "gmail",
+        "sender_rules": ["return@amazon.ca"],
+        "subject_regex": ".*",
+        "body_regex": null,
+        "event_family_prefixes": ["amazon."],
+        "enabled": false
+      }
+    },
+    {
+      "id": "manulife-claims",
+      "name": "Manulife claims updates",
+      "description": "Claim lifecycle updates from Manulife emails",
+      "tags": ["manulife", "claims", "insurance"],
+      "version": "1.0.0",
+      "monitor_defaults": {
+        "provider": "gmail",
+        "sender_rules": ["noreply@email.manulife.ca"],
+        "subject_regex": "^We've checked your claims$",
+        "body_regex": "Your latest claims",
+        "event_family_prefixes": ["manulife."],
+        "enabled": false
+      }
+    },
+    {
+      "id": "durham-orthodontics-approved-payment",
+      "name": "Durham Orthodontics approved payment",
+      "description": "Approved payment notifications from Elavon",
+      "tags": ["orthodontics", "payment", "elavon"],
+      "version": "1.0.0",
+      "monitor_defaults": {
+        "provider": "gmail",
+        "sender_rules": ["noreply@elavon.com"],
+        "subject_regex": "^Approved Payment$",
+        "body_regex": "Durham Orthodontics Ajax",
+        "event_family_prefixes": ["orthodontics."],
+        "enabled": false
+      }
+    }
+  ]
+}

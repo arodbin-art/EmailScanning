@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiRequest } from '../utils/api';
-import { MailAccount, Monitor } from '../utils/types';
+import { MailAccount, Monitor, MonitorTemplate } from '../utils/types';
+import { applyTemplateToDraft } from '../utils/templatePrefill';
 
 const defaultForm = {
   name: '',
@@ -93,8 +94,10 @@ function validateMonitorPayload(payload: Record<string, unknown>): ValidationRes
 
 export default function MonitorEditorPage() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const isNew = id === 'new';
+  const templateId = isNew ? searchParams.get('template') : null;
   const [form, setForm] = useState<FormState>({ ...defaultForm });
   const [senderRulesText, setSenderRulesText] = useState('');
   const [mode, setMode] = useState<EditorMode>('visual');
@@ -138,21 +141,30 @@ export default function MonitorEditorPage() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      apiRequest<Monitor[]>('/api/monitors'),
-      apiRequest<MailAccount[]>('/api/mail-accounts')
-    ])
-      .then(([monitorRes, mailRes]) => {
+    (async () => {
+      try {
+        const [monitorRes, mailRes] = await Promise.all([
+          apiRequest<Monitor[]>('/api/monitors'),
+          apiRequest<MailAccount[]>('/api/mail-accounts')
+        ]);
+        const templateRes =
+          isNew && templateId
+            ? await apiRequest<MonitorTemplate>(`/api/templates/${encodeURIComponent(templateId)}`)
+            : null;
         if (!active) return;
         setMailAccounts(mailRes.data);
         if (isNew) {
-          setForm({ ...defaultForm, provider: mailRes.data[0]?.provider || '' });
-          setSenderRulesText('');
-          setJsonText(JSON.stringify(defaultForm, null, 2));
+          let initialForm = { ...defaultForm, provider: mailRes.data[0]?.provider || '' };
+          if (templateRes?.data) {
+            initialForm = applyTemplateToDraft(initialForm, templateRes.data);
+          }
+          setForm(initialForm);
+          setSenderRulesText(initialForm.sender_rules.join('\n'));
+          setJsonText(JSON.stringify(toPayload(initialForm), null, 2));
         } else {
           const target = monitorRes.data.find((monitor) => monitor.id === id);
           if (target) {
-          const nextForm: FormState = {
+            const nextForm: FormState = {
               name: target.name,
               enabled: target.enabled,
               provider: target.provider,
@@ -180,16 +192,16 @@ export default function MonitorEditorPage() {
           }
         }
         setLoading(false);
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!active) return;
-        setErrors([err.message]);
+        setErrors([err instanceof Error ? err.message : 'Failed to load monitor data']);
         setLoading(false);
-      });
+      }
+    })();
     return () => {
       active = false;
     };
-  }, [id, isNew]);
+  }, [id, isNew, templateId]);
 
   const accountLookup = useMemo(() => {
     return new Map(mailAccounts.map((account) => [account.id, account]));

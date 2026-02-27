@@ -4,6 +4,7 @@ import MailAccountsPage from './pages/MailAccountsPage';
 import MonitorsPage from './pages/MonitorsPage';
 import MonitorEditorPage from './pages/MonitorEditorPage';
 import EventsPage from './pages/EventsPage';
+import TemplatesPage from './pages/TemplatesPage';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `nav-link${isActive ? ' active' : ''}`;
@@ -23,6 +24,9 @@ export default function App() {
           <NavLink to="/admin/monitors" className={navLinkClass}>
             Monitors
           </NavLink>
+          <NavLink to="/admin/templates" className={navLinkClass}>
+            Templates
+          </NavLink>
           <NavLink to="/admin/events" className={navLinkClass}>
             Events
           </NavLink>
@@ -34,6 +38,7 @@ export default function App() {
           <Route path="/admin/mail-accounts" element={<MailAccountsPage />} />
           <Route path="/admin/monitors" element={<MonitorsPage />} />
           <Route path="/admin/monitors/:id" element={<MonitorEditorPage />} />
+          <Route path="/admin/templates" element={<TemplatesPage />} />
           <Route path="/admin/events" element={<EventsPage />} />
           <Route path="*" element={<DashboardPage />} />
         </Routes>
