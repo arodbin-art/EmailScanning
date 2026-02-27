@@ -57,6 +57,10 @@ Deployment:
   - initial delivery run `signal-engine-deliver-dev-eei233e` => `Failed` (missing client-credentials env vars)
   - applied job env workaround (`RVI_AUTH_MODE=static`, `RVI_STATIC_BEARER_ALLOW=true`)
   - rerun `signal-engine-deliver-dev-eixkepw` => `Succeeded`
+  - configured client-credentials vars/secrets on delivery job and switched back to:
+    - `RVI_AUTH_MODE=client_credentials`
+    - `RVI_AUTH_TENANT_ID`, `RVI_AUTH_CLIENT_ID`, `RVI_AUTH_RESOURCE`, `RVI_AUTH_CLIENT_SECRET`
+  - verification execution `signal-engine-deliver-dev-yaf476s` => `Succeeded`
 
 ## Tracker Format (Codex)
 Required file shape for tracker compatibility:

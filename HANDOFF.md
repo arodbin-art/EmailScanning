@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-27T05:18:30Z
+Last updated: 2026-02-27T05:23:30Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -100,8 +100,10 @@ Last updated: 2026-02-27T05:18:30Z
     - job `signal-engine-deliver-dev` (Succeeded execution: `signal-engine-deliver-dev-eixkepw`)
     - container app `email-scanning-admin-dev` revision `email-scanning-admin-dev--0000005` (Ready/Running)
 - Delivery runtime note:
-  - current Azure delivery job is running with static token mode (`RVI_AUTH_MODE=static`, `RVI_STATIC_BEARER_ALLOW=true`) because client-credentials env vars are not configured in that job template yet.
-  - move back to client-credentials once `RVI_AUTH_TENANT_ID`, `RVI_AUTH_CLIENT_ID`, `RVI_AUTH_CLIENT_SECRET`, `RVI_AUTH_RESOURCE` are set.
+  - Azure delivery job is now back on client-credentials mode:
+    - `RVI_AUTH_MODE=client_credentials`
+    - `RVI_AUTH_TENANT_ID`, `RVI_AUTH_CLIENT_ID`, `RVI_AUTH_RESOURCE`, `RVI_AUTH_CLIENT_SECRET` are configured.
+  - validation execution: `signal-engine-deliver-dev-yaf476s` => `Succeeded` (2026-02-27 05:22 UTC).
 
 ## 2026-02-22 integration update
 - Amazon ingestion keeps deterministic rules parsing and emits:
