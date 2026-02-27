@@ -147,6 +147,26 @@ Notes:
   - auto-create insurance RVI when safe and `moneyrecovery_person_code` exists
 - If claim status has no direct MoneyRecovery field (denied/info-required/status-update):
   - event -> `needs_review` with extracted status/amounts in delivery log
+- AI review scoring (non-blocking, scoring-only):
+  - every emitted `manulife.*` event now includes `payload.ai_review` + `payload.ai_review_low`
+  - deterministic baseline is always computed from extracted fields (no AI dependency)
+  - optional iGPT score is blended only when `IGPT_ENABLED=true` and iGPT returns valid score
+  - final label thresholds:
+    - `high` >= `0.85`
+    - `medium` >= `0.65` and < `0.85`
+    - `low` < `0.65`
+  - iGPT failures or invalid responses never block ingestion; fallback is baseline-only review
+  - delivery appends a visible memo line on matched Manulife RVIs:
+    - `AI Review[<claim_id>]: <label> (<score>) - <rationale>`
+    - append is idempotent and best-effort (delivery does not fail if memo patch fails)
+
+### Manulife AI review baseline inputs
+Baseline score adds:
+- `+0.25` beneficiary present with >=2 tokens
+- `+0.20` claim type present (length >=3)
+- `+0.20` service date parsed to `YYYY-MM-DD`
+- `+0.20` submitted amount valid and >0
+- `+0.15` paid total valid and between `0` and `submitted*1.05`
 
 ## Backfill command
 Reprocess older rejected Amazon no-candidate events:
@@ -163,6 +183,8 @@ In `Monitors`:
 In `Events`:
 - filter by status
 - filter by event family (`amazon` / `manulife`)
+- view compact AI review label/score for Manulife rows
+- open AI review details for baseline score, iGPT score, flags, and rationale
 
 ## Near-miss tables
 Amazon:

@@ -33,6 +33,12 @@ import {
   persistAiCandidateSignals,
   safeAnalyzeSignals,
 } from "../intelligence/shadowRuntime.js"
+import {
+  AiReview,
+  buildAiReview,
+  computeManulifeBaselineScore,
+} from "../intelligence/aiReview.js"
+import { reviewManulifeWithIGPT } from "../intelligence/igptReviewManulife.js"
 
 export type IngestionOptions = {
   maxMessagesPerPoll: number
@@ -641,6 +647,12 @@ export class EmailIngestionService {
       .delete({ where: { emailId: params.emailId } })
       .catch(() => undefined)
 
+    const aiReview = await this.buildManulifeAiReview({
+      normalizedBody: params.normalizedBody,
+      parsed,
+      message: params.message,
+    })
+
     const payload = this.buildCommonSignalPayload({
       provider: params.provider,
       mailAccountId: params.mailAccountId,
@@ -660,6 +672,8 @@ export class EmailIngestionService {
           processed_at: parsed.dates.processedAt ?? null,
           paid_at: parsed.dates.paidAt ?? null,
         },
+        ai_review: aiReview,
+        ai_review_low: aiReview.label === "low",
       },
     })
 
@@ -737,6 +751,62 @@ export class EmailIngestionService {
       confidence: parsed.claimId ? 0.99 : 0.9,
     })
     return true
+  }
+
+  private async buildManulifeAiReview(params: {
+    parsed: NonNullable<ReturnType<typeof parseManulifeClaimEmail>>
+    message: ProviderMessage
+    normalizedBody: string
+  }): Promise<AiReview> {
+    const beneficiary = extractManulifeBeneficiary(params.normalizedBody)
+    const claimType = extractManulifeClaimType(params.normalizedBody)
+    const serviceDate = extractManulifeServiceDate(
+      params.normalizedBody,
+      params.message.receivedAt
+    )
+    const submitted =
+      params.parsed.amounts.amountClaimed ?? params.parsed.amounts.amountEligible ?? null
+    const paidTotal = params.parsed.amounts.amountPaid ?? null
+    const baselineScore = computeManulifeBaselineScore({
+      beneficiary,
+      claimType,
+      serviceDate,
+      submitted,
+      paidTotal,
+    })
+
+    const deterministicExtraction = {
+      claim_id: params.parsed.claimId ?? null,
+      status_text: params.parsed.statusText,
+      beneficiary,
+      claim_type: claimType,
+      service_date: serviceDate,
+      submitted,
+      paid_total: paidTotal,
+      amounts: {
+        amount_claimed: params.parsed.amounts.amountClaimed ?? null,
+        amount_eligible: params.parsed.amounts.amountEligible ?? null,
+        amount_paid: params.parsed.amounts.amountPaid ?? null,
+      },
+      dates: {
+        processed_at: params.parsed.dates.processedAt ?? null,
+        paid_at: params.parsed.dates.paidAt ?? null,
+      },
+    }
+
+    const igptReview = await reviewManulifeWithIGPT({
+      normalizedText: params.normalizedBody,
+      deterministicExtraction,
+    }).catch(() => null)
+
+    return buildAiReview({
+      baselineScore,
+      igptScore: igptReview?.score ?? null,
+      rationale: igptReview?.rationale,
+      flags: igptReview?.flags,
+      model: igptReview?.model,
+      createdAt: new Date(),
+    })
   }
 
   private async recordAmazonReturnNearMiss(params: {
@@ -986,4 +1056,80 @@ function summarizeAmazonStatusText(eventType: string, subject?: string | null): 
     return "refund issued"
   }
   return "status update"
+}
+
+function extractManulifeBeneficiary(normalizedBody: string): string | null {
+  const patterns = [
+    /(?:beneficiary|claimant|member|patient)\s*[:\-]\s*([A-Za-z][A-Za-z' -]{2,80})/i,
+    /\bfor\s+([A-Z][A-Za-z' -]{1,60}\s+[A-Z][A-Za-z' -]{1,60})\b/i,
+  ]
+  for (const pattern of patterns) {
+    const match = normalizedBody.match(pattern)
+    if (!match) continue
+    const normalized = normalizeManulifeText(match[1])
+    if (!normalized) continue
+    if (normalized.split(/\s+/).length >= 2) {
+      return normalized
+    }
+  }
+  return null
+}
+
+function extractManulifeClaimType(normalizedBody: string): string | null {
+  const match = normalizedBody.match(
+    /(?:claim type|service type|expense type)\s*[:\-]\s*([A-Za-z][A-Za-z/ &-]{2,80})/i
+  )
+  if (!match) {
+    return null
+  }
+  return normalizeManulifeText(match[1])
+}
+
+function extractManulifeServiceDate(
+  normalizedBody: string,
+  receivedAt: Date
+): string | null {
+  const match = normalizedBody.match(
+    /(?:service date|date of service)\s*[:\-]\s*([A-Za-z]{3,9}\.?\s+\d{1,2}(?:,\s*\d{4})?|\d{4}-\d{2}-\d{2})/i
+  )
+  if (!match) {
+    return null
+  }
+  return parseManulifeDateIso(match[1], receivedAt)
+}
+
+function parseManulifeDateIso(value: string, receivedAt: Date): string | null {
+  const trimmed = value.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const parsed = new Date(`${trimmed}T00:00:00Z`)
+    if (!Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === trimmed) {
+      return trimmed
+    }
+    return null
+  }
+
+  const hasExplicitYear = /\d{4}/.test(trimmed)
+  const receivedYear = receivedAt.getUTCFullYear()
+  const target = hasExplicitYear ? trimmed : `${trimmed}, ${receivedYear}`
+  const parsed = new Date(target)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  if (!hasExplicitYear) {
+    const maxFutureMs = 45 * 24 * 3600 * 1000
+    if (parsed.getTime() - receivedAt.getTime() > maxFutureMs) {
+      parsed.setUTCFullYear(parsed.getUTCFullYear() - 1)
+    }
+  }
+  return parsed.toISOString().slice(0, 10)
+}
+
+function normalizeManulifeText(value: string): string | null {
+  const normalized = value
+    .replace(/[|]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[.,;:]+$/g, "")
+    .trim()
+  return normalized.length > 0 ? normalized : null
 }

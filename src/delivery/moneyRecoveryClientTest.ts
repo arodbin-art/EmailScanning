@@ -244,6 +244,91 @@ async function testManulifeStatusUpdateNeedsReview(): Promise<void> {
   assert(result.status === "needs_review", `expected needs_review, got ${result.status}`)
 }
 
+async function testManulifeAiReviewMemoAppendIdempotent(): Promise<void> {
+  const calls: Call[] = []
+  let memo = "existing memo"
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = String(url)
+    const method = init?.method ?? "GET"
+    const body = init?.body ? JSON.parse(init.body) : undefined
+    calls.push({ url: u, method, body })
+
+    if (u.includes("/rvi/external-references/lookup")) return mkRes(200, { rvi_id: 501 })
+    if (u.includes("/rvi/501/external-references")) return mkRes(200, { ok: true })
+    if (u.endsWith("/rvi/501")) {
+      if (method === "PATCH") {
+        memo = body?.memo ?? memo
+        return mkRes(200, { ok: true })
+      }
+      return mkRes(200, {
+        id: 501,
+        memo,
+        flows: [
+          {
+            id: 77,
+            type: "claim",
+            sequence_order: 1,
+            amount_submitted: 45.5,
+            amount_paid: 45.5,
+          },
+        ],
+      })
+    }
+    if (u.includes("/claim-flows/77")) return mkRes(200, { ok: true })
+    return mkRes(500, { error: "unexpected", url: u, method })
+  }) as any
+
+  const client = new MoneyRecoveryClient({
+    baseUrl: "https://example.test",
+    bearerToken: "x",
+    timeoutMs: 1000,
+  })
+
+  const eventPayload = {
+    claim_id: "CLM-998877",
+    status_text: "paid",
+    amounts: { amount_paid: 45.5, amount_eligible: 45.5 },
+    dates: { paid_at: "2026-02-20" },
+    ai_review: {
+      provider: "igpt",
+      label: "low",
+      score: 0.52,
+      baselineScore: 0.62,
+      igptScore: 0.4,
+      rationale: "Missing service date from source email.",
+      flags: ["service_date_missing"],
+      createdAt: "2026-02-20T10:00:00.000Z",
+    },
+  }
+
+  const first = await client.deliverOutboxEvent({
+    eventId: 7,
+    eventType: "manulife.claim_paid",
+    sourceEmailId: 17,
+    mailAccountId: 4,
+    mailAccountPersonCode: "ROD",
+    payload: eventPayload,
+  })
+  const second = await client.deliverOutboxEvent({
+    eventId: 7,
+    eventType: "manulife.claim_paid",
+    sourceEmailId: 17,
+    mailAccountId: 4,
+    mailAccountPersonCode: "ROD",
+    payload: eventPayload,
+  })
+
+  assert(first.status === "accepted", `expected accepted, got ${first.status}`)
+  assert(second.status === "accepted", `expected accepted, got ${second.status}`)
+
+  const memoPatchCalls = calls.filter((call) => call.url.endsWith("/rvi/501") && call.method === "PATCH")
+  assert(memoPatchCalls.length === 1, `expected one memo patch, got ${memoPatchCalls.length}`)
+  assert(
+    String(memoPatchCalls[0].body?.memo ?? "").includes("AI Review[CLM-998877]"),
+    "memo patch should include ai review claim key line"
+  )
+}
+
 async function main() {
   await testCreateWhenNoMatchAndPersonCode()
   await testReplayDoesNotDuplicateCreate()
@@ -251,6 +336,7 @@ async function main() {
   await testRefundIssuedArrivesFirst()
   await testManulifeClaimPaidUpdatesClaimFlow()
   await testManulifeStatusUpdateNeedsReview()
+  await testManulifeAiReviewMemoAppendIdempotent()
   console.log("moneyRecoveryClientTest ok")
 }
 

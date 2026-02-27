@@ -1,6 +1,6 @@
 # signal-engine
 
-Last updated: 2026-02-26
+Last updated: 2026-02-27
 Status: IN PROGRESS
 
 ## NEXT
@@ -8,6 +8,55 @@ Status: IN PROGRESS
 - [ ] 2. Refresh Gmail OAuth token for account `id=1` (`invalid_grant`) and re-run live ingestion
 - [x] 3. Autonomous ingest+delivery scheduler + Manulife integration completed
 - [x] 4. Replace static/session tokens with proper service auth (`RVI` client credentials + official iGPT server credential)
+
+## 2026-02-27 - Manulife AI review score surfaced end-to-end
+Status: COMPLETE
+- Added `AiReview` contract + scoring helpers:
+  - `src/intelligence/aiReview.ts`
+  - includes `clamp01`, label thresholds, rationale truncation, deterministic baseline scoring.
+- Added optional iGPT Manulife scorer (shadow scoring only):
+  - `src/intelligence/igptReviewManulife.ts`
+  - uses `IGPT_ENABLED`, `IGPT_API_KEY`, `IGPT_BASE_URL`, `IGPT_TIMEOUT_MS`
+  - never throws; malformed/missing iGPT score falls back to deterministic baseline only.
+- Ingestion integration:
+  - `src/ingestion/emailIngestionService.ts`
+  - each emitted `manulife.*` event now includes:
+    - `payload.ai_review`
+    - `payload.ai_review_low` when label is `low`
+  - dedupe keys and event types unchanged.
+- Delivery integration:
+  - `src/delivery/moneyRecoveryClient.ts`
+  - appends idempotent memo line for Manulife RVIs:
+    - `AI Review[<claim_id>]: <label> (<score>) - <rationale>`
+  - append is best-effort and does not fail delivery if memo patch fails.
+- Admin visibility:
+  - `email-scanning-admin/ui/src/pages/EventsPage.tsx`
+  - `email-scanning-admin/ui/src/utils/aiReview.ts`
+  - Events table shows compact AI review label/score and detail values (`baselineScore`, `igptScore`, `flags`, `rationale`).
+
+Validation runs:
+- `npm run build` ✅
+- `npm run test:manulife` ✅
+- `npm run test:intelligence:shadow` ✅
+- `npm run test:igpt` ✅
+- `npm run test:delivery:money-recovery` ✅
+
+Additional UI safety test:
+- `cd email-scanning-admin/ui && npm run test:ai-review` ✅
+
+Deployment:
+- Built and pushed:
+  - `emailscanacr354705.azurecr.io/signal-engine:manual-manulife-ai-review-20260227-051213`
+  - `emailscanacr354705.azurecr.io/email-scanning-admin:manual-manulife-ai-review-20260227-051626`
+- Updated Azure resources:
+  - Container Apps Job `signal-engine-dev` -> new signal-engine image
+  - Container Apps Job `signal-engine-deliver-dev` -> new signal-engine image
+  - Container App `email-scanning-admin-dev` -> new admin image
+- Manual run validation:
+  - `signal-engine-dev-dhdy0ml` => `Succeeded`
+  - initial delivery run `signal-engine-deliver-dev-eei233e` => `Failed` (missing client-credentials env vars)
+  - applied job env workaround (`RVI_AUTH_MODE=static`, `RVI_STATIC_BEARER_ALLOW=true`)
+  - rerun `signal-engine-deliver-dev-eixkepw` => `Succeeded`
 
 ## Tracker Format (Codex)
 Required file shape for tracker compatibility:

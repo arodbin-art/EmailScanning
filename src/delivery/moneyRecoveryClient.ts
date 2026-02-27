@@ -27,6 +27,14 @@ type ManulifeEventContext = {
   processedAt: string | null
   paidAt: string | null
   emailReceivedAt: string | null
+  aiReview: {
+    label: "high" | "medium" | "low"
+    score: number
+    baselineScore: number
+    igptScore: number | null
+    rationale: string
+    flags: string[]
+  } | null
 }
 
 export class MoneyRecoveryClient implements DeliveryClient {
@@ -114,8 +122,13 @@ export class MoneyRecoveryClient implements DeliveryClient {
       rviId: resolved.rviId,
     })
     if (applied.kind === "error") {
+      if (applied.result.status === "needs_review") {
+        await this.tryAppendManulifeAiReviewMemo(resolved.rviId, input.eventId, manulife)
+      }
       return applied.result
     }
+
+    await this.tryAppendManulifeAiReviewMemo(resolved.rviId, input.eventId, manulife)
 
     return {
       status: "accepted",
@@ -475,6 +488,44 @@ export class MoneyRecoveryClient implements DeliveryClient {
         status: "needs_review",
         raw: { reason: "unsupported_event_type", event_type: eventType },
       },
+    }
+  }
+
+  private async tryAppendManulifeAiReviewMemo(
+    rviId: number,
+    sourceEventId: number,
+    manulife: ManulifeEventContext
+  ): Promise<void> {
+    if (!manulife.aiReview) {
+      return
+    }
+
+    const line = buildManulifeAiReviewLine(manulife.claimId, manulife.aiReview)
+    const detail = await this.getRviDetail(rviId)
+    if (detail.kind === "error") {
+      return
+    }
+
+    const existingMemo = asString((detail.data as any)?.memo)
+    const linePrefix = buildManulifeAiReviewPrefix(manulife.claimId)
+    if (
+      (existingMemo && existingMemo.includes(line)) ||
+      (existingMemo && existingMemo.includes(linePrefix))
+    ) {
+      return
+    }
+
+    const nextMemo = appendMemoLine(existingMemo, line)
+    if (!nextMemo || nextMemo === existingMemo) {
+      return
+    }
+
+    const res = await this.requestJson("PATCH", `/rvi/${rviId}`, {
+      memo: nextMemo,
+      source_event_id: sourceEventId,
+    })
+    if (!res.ok) {
+      return
     }
   }
 
@@ -879,6 +930,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
   }
 
   private toManulifeContext(payload: Record<string, unknown>): ManulifeEventContext {
+    const aiReview = parseAiReview((payload as any)?.ai_review)
     return {
       claimId: asString(payload.claim_id),
       statusText: asString(payload.status_text),
@@ -888,6 +940,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
       processedAt: asString((payload as any)?.dates?.processed_at ?? payload.processed_at),
       paidAt: asString((payload as any)?.dates?.paid_at ?? payload.paid_at),
       emailReceivedAt: asString((payload as any)?.email?.received_at),
+      aiReview,
     }
   }
 
@@ -1026,6 +1079,83 @@ function appendMemo(existing: string | null, addition: string): string {
   if (!existing || existing.trim().length === 0) return addition
   if (existing.includes(addition)) return existing
   return `${existing} | ${addition}`.slice(0, 200)
+}
+
+function appendMemoLine(existing: string | null, line: string): string {
+  const nextLine = line.slice(0, 200)
+  if (!existing || existing.trim().length === 0) {
+    return nextLine
+  }
+  if (existing.includes(nextLine)) {
+    return existing
+  }
+  const available = 200 - existing.length - 1
+  if (available <= 0) {
+    return existing
+  }
+  return `${existing}\n${nextLine.slice(0, available)}`
+}
+
+function buildManulifeAiReviewPrefix(claimId: string | null): string {
+  return claimId ? `AI Review[${claimId}]:` : "AI Review:"
+}
+
+function buildManulifeAiReviewLine(
+  claimId: string | null,
+  review: {
+    label: "high" | "medium" | "low"
+    score: number
+    rationale: string
+  }
+): string {
+  const score = Number.isFinite(review.score) ? review.score : 0
+  const prefix = buildManulifeAiReviewPrefix(claimId)
+  const rationale = (review.rationale ?? "").replace(/\s+/g, " ").trim()
+  return `${prefix} ${review.label} (${score.toFixed(2)}) - ${rationale}`.slice(0, 200)
+}
+
+function parseAiReview(value: unknown): {
+  label: "high" | "medium" | "low"
+  score: number
+  baselineScore: number
+  igptScore: number | null
+  rationale: string
+  flags: string[]
+} | null {
+  if (!value || typeof value !== "object") {
+    return null
+  }
+  const row = value as Record<string, unknown>
+  const label = asString(row.label)
+  if (label !== "high" && label !== "medium" && label !== "low") {
+    return null
+  }
+  const score = asNumber(row.score)
+  const baselineScore = asNumber(row.baselineScore)
+  const rationale = asString(row.rationale)
+  if (score === null || baselineScore === null || !rationale) {
+    return null
+  }
+  const igptScore = asNumber(row.igptScore)
+  const flags = Array.isArray(row.flags)
+    ? row.flags.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry))
+    : []
+
+  return {
+    label,
+    score: clamp01(score),
+    baselineScore: clamp01(baselineScore),
+    igptScore: igptScore === null ? null : clamp01(igptScore),
+    rationale: rationale.slice(0, 140),
+    flags,
+  }
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  if (value <= 0) return 0
+  if (value >= 1) return 1
+  return value
 }
 
 function truncateMemo(value: string, maxLength = 200): string {

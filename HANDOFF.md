@@ -1,6 +1,6 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-26T23:47:57Z
+Last updated: 2026-02-27T05:18:30Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
@@ -62,6 +62,13 @@ Last updated: 2026-02-26T23:47:57Z
 - Delivery job is configured with MoneyRecovery credentials in local `.env`; latest delivery run reached MoneyRecovery and rejected events with `no_candidate_rvi_found`.
 - Delivery logic now auto-creates RVIs when no candidate exists and `moneyrecovery_person_code` is configured for the source mail account.
 - No-match + missing person code now sets outbox status `needs_review` (instead of `rejected`).
+- Manulife events now include deterministic `ai_review` scoring in outbox payload:
+  - `payload.ai_review` with score/label/rationale/baseline/igptScore
+  - `payload.ai_review_low=true` when label is `low`
+  - scoring remains non-authoritative (deterministic parser still controls event emission)
+- Delivery now appends idempotent visible Manulife memo line on matched RVIs:
+  - `AI Review[<claim_id>]: <label> (<score>) - <rationale>`
+  - memo append is best-effort and does not fail delivery when memo patch fails
 - Amazon return replay tool available for dry-run or emission from stored emails.
 - Azure Postgres firewall now has rule `allow-email-scanning-current` for current public IP.
 - Cron job installed to auto-refresh Azure Postgres firewall IP every 10 minutes.
@@ -84,6 +91,17 @@ Last updated: 2026-02-26T23:47:57Z
 - Legacy `signal-engine-poll.timer` disabled to avoid duplicate poll runs.
 - Current ingestion blocker on NAS: Gmail OAuth refresh returns `invalid_grant` for mail account `id=1`; delivery still runs.
 - Admin UI now includes monitor template buttons (Amazon + Manulife) and event family filters on `/admin/events`.
+- Admin Events page now shows Manulife AI review summary and detail values (`baselineScore`, `igptScore`, `flags`, `rationale`).
+- Azure deployment completed for this change set:
+  - `signal-engine` image: `emailscanacr354705.azurecr.io/signal-engine:manual-manulife-ai-review-20260227-051213`
+  - `email-scanning-admin` image: `emailscanacr354705.azurecr.io/email-scanning-admin:manual-manulife-ai-review-20260227-051626`
+  - updated resources:
+    - job `signal-engine-dev` (Succeeded execution: `signal-engine-dev-dhdy0ml`)
+    - job `signal-engine-deliver-dev` (Succeeded execution: `signal-engine-deliver-dev-eixkepw`)
+    - container app `email-scanning-admin-dev` revision `email-scanning-admin-dev--0000005` (Ready/Running)
+- Delivery runtime note:
+  - current Azure delivery job is running with static token mode (`RVI_AUTH_MODE=static`, `RVI_STATIC_BEARER_ALLOW=true`) because client-credentials env vars are not configured in that job template yet.
+  - move back to client-credentials once `RVI_AUTH_TENANT_ID`, `RVI_AUTH_CLIENT_ID`, `RVI_AUTH_CLIENT_SECRET`, `RVI_AUTH_RESOURCE` are set.
 
 ## 2026-02-22 integration update
 - Amazon ingestion keeps deterministic rules parsing and emits:

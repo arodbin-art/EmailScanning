@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiRequest } from '../utils/api';
 import { EventStatus, MailAccount, SignalEvent } from '../utils/types';
+import { parseAiReview } from '../utils/aiReview';
 
 const statuses: Array<{ label: string; value: '' | EventStatus }> = [
   { label: 'All', value: '' },
@@ -118,31 +119,58 @@ export default function EventsPage() {
               <th>Created</th>
               <th>Delivered</th>
               <th>Confidence</th>
+              <th>AI Review</th>
               <th>Delivery Response</th>
             </tr>
           </thead>
           <tbody>
-            {events.map((event) => (
-              <tr key={event.id}>
-                <td>{event.id}</td>
-                <td>
-                  <span className={`badge event-${event.status}`}>{event.status}</span>
-                </td>
-                <td>{event.event_type}</td>
-                <td>{event.email_subject || '—'}</td>
-                <td>{event.email_from || '—'}</td>
-                <td>{formatDate(event.email_received_at)}</td>
-                <td>{formatDate(event.created_at)}</td>
-                <td>{formatDate(event.delivered_at)}</td>
-                <td>{event.confidence ?? '—'}</td>
-                <td>
-                  <pre className="code compact">{jsonPreview(event.rvi_response)}</pre>
-                </td>
-              </tr>
-            ))}
+            {events.map((event) => {
+              const aiReview = parseAiReview(event.payload_json);
+              return (
+                <tr key={event.id}>
+                  <td>{event.id}</td>
+                  <td>
+                    <span className={`badge event-${event.status}`}>{event.status}</span>
+                  </td>
+                  <td>{event.event_type}</td>
+                  <td>{event.email_subject || '—'}</td>
+                  <td>{event.email_from || '—'}</td>
+                  <td>{formatDate(event.email_received_at)}</td>
+                  <td>{formatDate(event.created_at)}</td>
+                  <td>{formatDate(event.delivered_at)}</td>
+                  <td>{event.confidence ?? '—'}</td>
+                  <td>
+                    {aiReview ? (
+                      <details>
+                        <summary>
+                          {aiReview.label} ({aiReview.score.toFixed(2)})
+                        </summary>
+                        <div style={{ marginTop: 8 }}>
+                          <div>baseline: {aiReview.baselineScore.toFixed(2)}</div>
+                          <div>
+                            igpt:{' '}
+                            {aiReview.igptScore === null ? '—' : aiReview.igptScore.toFixed(2)}
+                          </div>
+                          <div>rationale: {aiReview.rationale}</div>
+                          <div>
+                            flags:{' '}
+                            {aiReview.flags.length > 0 ? aiReview.flags.join(', ') : '—'}
+                          </div>
+                        </div>
+                      </details>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td>
+                    <pre className="code compact">{jsonPreview(event.rvi_response)}</pre>
+                  </td>
+                </tr>
+              );
+            })}
             {events.length === 0 && (
               <tr>
-                <td colSpan={10}>No events found.</td>
+                <td colSpan={11}>No events found.</td>
               </tr>
             )}
           </tbody>

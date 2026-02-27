@@ -8,6 +8,7 @@
     "dev:vault": "./scripts/run_with_hcv.sh vite",
     "build": "vite build",
     "build:vault": "./scripts/run_with_hcv.sh vite build",
+    "test:ai-review": "tsc --module ESNext --target ES2022 --moduleResolution Bundler --strict --skipLibCheck --noEmit false --outDir dist-test src/utils/aiReview.ts src/utils/aiReviewTest.ts && node --no-warnings --experimental-specifier-resolution=node dist-test/utils/aiReviewTest.js",
     "preview": "vite preview",
     "preview:vault": "./scripts/run_with_hcv.sh vite preview"
   },

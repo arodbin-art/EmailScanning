@@ -1,5 +1,7 @@
 import { IGPTProvider } from "./igptProvider.js"
 import { IntelligenceEmailInput } from "./types.js"
+import { buildAiReview, computeManulifeBaselineScore } from "./aiReview.js"
+import { reviewManulifeWithIGPT } from "./igptReviewManulife.js"
 
 function assert(condition: unknown, message: string) {
   if (!condition) {
@@ -298,6 +300,83 @@ async function testAutoModeSkipsSessionWithoutFallbackFlag(): Promise<void> {
   assert(result.length === 0, "auto mode should return empty when api fails and no fallback")
 }
 
+async function testManulifeReviewDisabledFallsBackToBaseline(): Promise<void> {
+  const original = snapshotEnv()
+  process.env.IGPT_ENABLED = "false"
+  delete process.env.IGPT_API_KEY
+
+  const baseline = computeManulifeBaselineScore({
+    beneficiary: "Rod Allen",
+    claimType: "Dental",
+    serviceDate: "2026-03-01",
+    submitted: 120,
+    paidTotal: 99,
+  })
+  const igpt = await reviewManulifeWithIGPT({
+    normalizedText: "Claim Number: CLM-123\nAmount paid: $99",
+    deterministicExtraction: { claim_id: "CLM-123" },
+  })
+  const review = buildAiReview({
+    baselineScore: baseline,
+    igptScore: igpt?.score ?? null,
+    rationale: igpt?.rationale,
+    flags: igpt?.flags,
+    model: igpt?.model,
+  })
+  restoreEnv(original)
+
+  assert(igpt === null, "disabled IGPT review should return null")
+  assert(
+    Math.abs(review.score - baseline) < 0.0001,
+    "disabled IGPT should keep baseline score"
+  )
+  assert(review.igptScore === null, "disabled IGPT should leave igptScore null")
+}
+
+async function testManulifeReviewMalformedResponseFallsBackToBaseline(): Promise<void> {
+  const original = snapshotEnv()
+  const originalFetch = globalThis.fetch
+  process.env.IGPT_ENABLED = "true"
+  process.env.IGPT_API_KEY = "test-key"
+  process.env.IGPT_BASE_URL = "https://api.igpt.ai"
+
+  globalThis.fetch = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({ output: { json: { rationale: "missing score" } } }),
+    }) as any) as any
+
+  const baseline = computeManulifeBaselineScore({
+    beneficiary: "Rod Allen",
+    claimType: "Dental",
+    serviceDate: "2026-03-01",
+    submitted: 100,
+    paidTotal: 90,
+  })
+  const igpt = await reviewManulifeWithIGPT({
+    normalizedText: "Claim Number: CLM-123\nAmount paid: $90",
+    deterministicExtraction: { claim_id: "CLM-123" },
+  })
+  const review = buildAiReview({
+    baselineScore: baseline,
+    igptScore: igpt?.score ?? null,
+    rationale: igpt?.rationale,
+    flags: igpt?.flags,
+    model: igpt?.model,
+  })
+
+  globalThis.fetch = originalFetch
+  restoreEnv(original)
+
+  assert(igpt === null, "malformed IGPT review payload should return null")
+  assert(
+    Math.abs(review.score - baseline) < 0.0001,
+    "malformed IGPT should keep baseline score"
+  )
+  assert(review.igptScore === null, "malformed IGPT should keep igptScore null")
+}
+
 function snapshotEnv(): Record<string, string | undefined> {
   return {
     IGPT_ENABLED: process.env.IGPT_ENABLED,
@@ -336,6 +415,8 @@ async function main() {
   await testSessionModeReturnsSignalsFromOutputJson()
   await testAutoModeFallsBackToSessionAfterApiAuth()
   await testAutoModeSkipsSessionWithoutFallbackFlag()
+  await testManulifeReviewDisabledFallsBackToBaseline()
+  await testManulifeReviewMalformedResponseFallsBackToBaseline()
   console.log("igptProviderTest ok")
 }
 

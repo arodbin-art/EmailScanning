@@ -3,6 +3,7 @@ import {
   parseManulifeClaimEmail,
 } from "./manulifeClaimParser.js"
 import { MANULIFE_EVENT_TYPES } from "../events/signalEvents.js"
+import { computeManulifeBaselineScore } from "../intelligence/aiReview.js"
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -174,6 +175,42 @@ function runTests() {
     normalizedBody: "random update",
   })
   assert(unrelated === null, "non-manulife senders should not parse")
+
+  const baselineComplete = computeManulifeBaselineScore({
+    beneficiary: "Rod Allen",
+    claimType: "Dental",
+    serviceDate: "2026-03-01",
+    submitted: 124.85,
+    paidTotal: 110.5,
+  })
+  assert(
+    baselineComplete >= 0.85,
+    `complete baseline should be high confidence, got ${baselineComplete}`
+  )
+
+  const baselineMissingDate = computeManulifeBaselineScore({
+    beneficiary: "Rod Allen",
+    claimType: "Dental",
+    serviceDate: null,
+    submitted: 124.85,
+    paidTotal: 110.5,
+  })
+  assert(
+    baselineMissingDate < 0.85,
+    `missing service date should reduce confidence, got ${baselineMissingDate}`
+  )
+
+  const baselineMissingAmount = computeManulifeBaselineScore({
+    beneficiary: "Rod Allen",
+    claimType: "Dental",
+    serviceDate: "2026-03-01",
+    submitted: null,
+    paidTotal: 110.5,
+  })
+  assert(
+    baselineMissingAmount <= 0.65,
+    `missing submitted amount should be low confidence, got ${baselineMissingAmount}`
+  )
 
   console.log("Manulife claim parser tests passed")
 }
