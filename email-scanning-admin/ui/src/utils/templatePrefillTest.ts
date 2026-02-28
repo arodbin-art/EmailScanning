@@ -38,6 +38,11 @@ function testAmazonTemplatePrefill(): void {
       subject_regex: '.*',
       body_regex: null,
       event_family_prefixes: ['amazon.'],
+      allowed_event_types: [
+        'amazon.return_requested',
+        'amazon.return_dropped_off',
+        'amazon.refund_issued'
+      ],
       enabled: false
     }
   };
@@ -63,7 +68,7 @@ function testUnknownFamilyLeavesEventsBlank(): void {
   };
 
   const draft = applyTemplateToDraft(baseDraft, template);
-  assert(draft.allowed_event_types.length === 0, 'unknown families should not fabricate event types');
+  assert(draft.allowed_event_types.length === 0, 'missing allowed_event_types should default to empty');
 }
 
 function main(): void {

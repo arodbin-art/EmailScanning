@@ -1,5 +1,7 @@
 import { parseAmazonReturnEmail } from "../automation/amazonReturnParser.js"
 import { parseManulifeClaimEmail } from "../automation/manulifeClaimParser.js"
+import { parseOrthodonticsPaymentEmail } from "../automation/orthodonticsPaymentParser.js"
+import { parseOrthodonticsAppointmentEmail } from "../automation/orthodonticsAppointmentParser.js"
 import { EmailIntelligenceProvider, IntelligenceEmailInput, StructuredSignal } from "./types.js"
 
 export class DeterministicProvider implements EmailIntelligenceProvider {
@@ -28,6 +30,56 @@ export class DeterministicProvider implements EmailIntelligenceProvider {
     })
     if (manulife) {
       return [mapManulifeSignal(email, manulife)]
+    }
+
+    const orthodontics = parseOrthodonticsPaymentEmail({
+      provider: email.provider,
+      fromAddress: email.fromAddress,
+      subject: email.subject,
+      receivedAt: email.receivedAt,
+      normalizedBody: email.normalizedText,
+    })
+    if (orthodontics) {
+      return [
+        {
+          eventType: orthodontics.eventType,
+          primaryRef: orthodontics.transactionId ?? orthodontics.paymentReference ?? email.emailId,
+          amount: orthodontics.amount ?? undefined,
+          occurredAt: email.receivedAt.toISOString(),
+          confidence: 0.98,
+          payload: {
+            provider: orthodontics.merchant,
+            amount_total: orthodontics.amount,
+            currency: orthodontics.currency,
+            transaction_id: orthodontics.transactionId ?? null,
+            payment_reference: orthodontics.paymentReference ?? null,
+            status_text: orthodontics.statusText,
+          },
+        },
+      ]
+    }
+
+    const appointment = parseOrthodonticsAppointmentEmail({
+      provider: email.provider,
+      fromAddress: email.fromAddress,
+      subject: email.subject,
+      receivedAt: email.receivedAt,
+      normalizedBody: email.normalizedText,
+    })
+    if (appointment) {
+      return [
+        {
+          eventType: appointment.eventType,
+          primaryRef: email.emailId,
+          occurredAt: email.receivedAt.toISOString(),
+          confidence: 0.95,
+          payload: {
+            clinic: appointment.clinic,
+            status_text: appointment.statusText,
+            reminder_window: appointment.reminderWindow ?? null,
+          },
+        },
+      ]
     }
 
     return []

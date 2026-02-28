@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
+process.env.ADMIN_AUTH_MODE = 'token';
+delete process.env.ADMIN_ENTRA_AUDIENCE;
+delete process.env.ADMIN_ENTRA_TENANT_ID;
+delete process.env.ADMIN_ENTRA_ISSUER;
 
 const { createApp } = await import('./app.js');
 const app = createApp();

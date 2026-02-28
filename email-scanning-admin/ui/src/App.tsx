@@ -5,6 +5,7 @@ import MonitorsPage from './pages/MonitorsPage';
 import MonitorEditorPage from './pages/MonitorEditorPage';
 import EventsPage from './pages/EventsPage';
 import TemplatesPage from './pages/TemplatesPage';
+import AuthControls from './components/AuthControls';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `nav-link${isActive ? ' active' : ''}`;
@@ -31,6 +32,9 @@ export default function App() {
             Events
           </NavLink>
         </nav>
+        <div className="sidebar-footer">
+          <AuthControls />
+        </div>
       </aside>
       <main className="main">
         <Routes>

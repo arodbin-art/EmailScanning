@@ -1,0 +1,8 @@
+Approved Payment
+
+Merchant: Durham Orthodontics Ajax
+Transaction Number: ELV-778899
+Payment Amount: CAD $235.50
+
+Status: Approved
+Thank you for your payment.

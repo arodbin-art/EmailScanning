@@ -1,4 +1,5 @@
 import { MoneyRecoveryClient } from "./moneyRecoveryClient.js"
+import { ObjectStorage } from "../storage/objectStorage.js"
 
 function assert(condition: unknown, message: string) {
   if (!condition) {
@@ -329,6 +330,191 @@ async function testManulifeAiReviewMemoAppendIdempotent(): Promise<void> {
   )
 }
 
+async function testOrthodonticsPaymentCreatesInsuranceRviAndUploadsArtifact(): Promise<void> {
+  const calls: Call[] = []
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = String(url)
+    const method = init?.method ?? "GET"
+    calls.push({
+      url: u,
+      method,
+      body:
+        typeof init?.body === "string"
+          ? JSON.parse(init.body)
+          : init?.body instanceof FormData
+          ? { formData: true }
+          : undefined,
+    })
+
+    if (u.includes("/rvi/external-references/lookup")) return mkRes(404, { error: "not found" })
+    if (u.endsWith("/rvi/urgent")) return mkRes(200, [])
+    if (u.endsWith("/rvi")) return mkRes(201, { id: 9901 })
+    if (u.includes("/rvi/9901/external-references")) return mkRes(200, { ok: true })
+    if (u.endsWith("/rvi/9901/artifacts")) {
+      if (method === "GET") return mkRes(200, [])
+      return mkRes(201, { id: "art-1" })
+    }
+    if (u.endsWith("/rvi/9901")) {
+      if (method === "GET") {
+        return mkRes(200, {
+          id: 9901,
+          memo: null,
+          flows: [
+            {
+              id: 210,
+              type: "claim",
+              sequence_order: 1,
+              amount_submitted: 0,
+              amount_paid: 0,
+            },
+          ],
+        })
+      }
+      return mkRes(200, { ok: true })
+    }
+
+    return mkRes(500, { error: "unexpected", url: u, method })
+  }) as any
+
+  const mockStorage: ObjectStorage = {
+    async putObject() {},
+    async getObject() {
+      return { body: Buffer.from("%PDF-1.4") }
+    },
+    async headObject() {
+      return true
+    },
+    async deleteObject() {},
+  }
+
+  const client = new MoneyRecoveryClient({
+    baseUrl: "https://example.test",
+    bearerToken: "x",
+    timeoutMs: 1000,
+    attachmentStorage: mockStorage,
+  })
+  const result = await client.deliverOutboxEvent({
+    eventId: 8,
+    eventType: "orthodontics.payment_approved",
+    sourceEmailId: 18,
+    mailAccountId: 10,
+    mailAccountPersonCode: "CHA",
+    payload: {
+      person_code_hint: "CHA",
+      provider_name: "Durham Orthodontics",
+      amount_total: 488.2,
+      transaction_id: "TX-ORTH-111",
+      attachments: [
+        {
+          filename: "invoice.pdf",
+          mime_type: "application/pdf",
+          size_bytes: 1234,
+          object_key: "emails/gmail/2026/02/a/attachments/invoice.pdf",
+        },
+      ],
+      email: {
+        received_at: "2026-02-28T02:00:00.000Z",
+      },
+    },
+  })
+
+  assert(result.status === "accepted", `expected accepted, got ${result.status}`)
+  assert(calls.some((c) => c.url.endsWith("/rvi") && c.method === "POST"), "expected insurance RVI create")
+  assert(
+    calls.some((c) => c.url.includes("/rvi/9901/external-references") && c.method === "PATCH"),
+    "expected external reference upsert"
+  )
+  assert(
+    calls.some((c) => c.url.endsWith("/rvi/9901/artifacts") && c.method === "POST"),
+    "expected artifact upload"
+  )
+}
+
+async function testOrthodonticsReplayDoesNotDuplicateCreate(): Promise<void> {
+  const calls: Call[] = []
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = String(url)
+    const method = init?.method ?? "GET"
+    calls.push({
+      url: u,
+      method,
+      body:
+        typeof init?.body === "string"
+          ? JSON.parse(init.body)
+          : init?.body instanceof FormData
+          ? { formData: true }
+          : undefined,
+    })
+    if (u.includes("/rvi/external-references/lookup")) return mkRes(200, { rvi_id: 5501 })
+    if (u.includes("/rvi/5501/external-references")) return mkRes(200, { ok: true })
+    if (u.endsWith("/rvi/5501/artifacts")) return mkRes(200, [])
+    if (u.endsWith("/rvi/5501")) {
+      if (method === "GET") {
+        return mkRes(200, {
+          id: 5501,
+          memo: "Orthodontics: invoice received via email. Plan: WSIB(ML) 50%, then OCT(ML) 50% after COB.",
+          flows: [
+            {
+              id: 310,
+              type: "claim",
+              sequence_order: 1,
+              amount_submitted: 0,
+              amount_paid: 0,
+            },
+          ],
+        })
+      }
+      return mkRes(200, { ok: true })
+    }
+    return mkRes(500, { error: "unexpected", url: u, method })
+  }) as any
+
+  const client = new MoneyRecoveryClient({ baseUrl: "https://example.test", bearerToken: "x", timeoutMs: 1000 })
+  const result = await client.deliverOutboxEvent({
+    eventId: 9,
+    eventType: "orthodontics.payment_approved",
+    sourceEmailId: 19,
+    mailAccountId: 10,
+    mailAccountPersonCode: "CHA",
+    payload: {
+      person_code_hint: "CHA",
+      provider_name: "Durham Orthodontics",
+      amount_total: 488.2,
+      transaction_id: "TX-ORTH-111",
+      attachments: [],
+      email: {
+        received_at: "2026-02-28T02:00:00.000Z",
+      },
+    },
+  })
+
+  assert(result.status === "accepted", `expected accepted, got ${result.status}`)
+  assert(!calls.some((c) => c.url.endsWith("/rvi") && c.method === "POST"), "should not create duplicate RVI")
+}
+
+async function testOrthodonticsAppointmentSignalsMarkedNonFinancial(): Promise<void> {
+  const calls: Call[] = []
+  globalThis.fetch = (async (url: any, init: any) => {
+    calls.push({ url: String(url), method: init?.method ?? "GET" })
+    return mkRes(500, { error: "fetch should not be called" })
+  }) as any
+
+  const client = new MoneyRecoveryClient({ baseUrl: "https://example.test", bearerToken: "x", timeoutMs: 1000 })
+  const result = await client.deliverOutboxEvent({
+    eventId: 10,
+    eventType: "orthodontics.appointment_reminder",
+    sourceEmailId: 20,
+    mailAccountId: 10,
+    payload: {
+      status_text: "Appointment reminder",
+    },
+  })
+
+  assert(result.status === "accepted", `expected accepted, got ${result.status}`)
+  assert((result.raw as any)?.reason === "non_financial_signal", "expected non_financial_signal reason")
+  assert(calls.length === 0, "should not call MoneyRecovery API for appointment events")
+}
+
 async function main() {
   await testCreateWhenNoMatchAndPersonCode()
   await testReplayDoesNotDuplicateCreate()
@@ -337,6 +523,9 @@ async function main() {
   await testManulifeClaimPaidUpdatesClaimFlow()
   await testManulifeStatusUpdateNeedsReview()
   await testManulifeAiReviewMemoAppendIdempotent()
+  await testOrthodonticsPaymentCreatesInsuranceRviAndUploadsArtifact()
+  await testOrthodonticsReplayDoesNotDuplicateCreate()
+  await testOrthodonticsAppointmentSignalsMarkedNonFinancial()
   console.log("moneyRecoveryClientTest ok")
 }
 

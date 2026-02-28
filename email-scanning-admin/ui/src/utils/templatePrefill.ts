@@ -1,17 +1,5 @@
 import { MonitorTemplate } from './types';
 
-const EVENT_FAMILY_DEFAULTS: Record<string, string[]> = {
-  'amazon.': ['amazon.return_requested', 'amazon.return_dropped_off', 'amazon.refund_issued'],
-  'manulife.': [
-    'manulife.claim_received',
-    'manulife.claim_processed',
-    'manulife.claim_paid',
-    'manulife.claim_denied',
-    'manulife.claim_info_required',
-    'manulife.claim_status_update'
-  ]
-};
-
 export type MonitorEditorDraft = {
   name: string;
   enabled: boolean;
@@ -30,22 +18,6 @@ export type MonitorEditorDraft = {
   allowed_event_types: string[];
 };
 
-function mapEventFamilies(prefixes: string[] | null | undefined): string[] {
-  if (!prefixes || prefixes.length === 0) {
-    return [];
-  }
-  const output = new Set<string>();
-  for (const prefix of prefixes) {
-    const mapped = EVENT_FAMILY_DEFAULTS[prefix];
-    if (mapped) {
-      for (const eventType of mapped) {
-        output.add(eventType);
-      }
-    }
-  }
-  return Array.from(output);
-}
-
 export function applyTemplateToDraft(
   draft: MonitorEditorDraft,
   template: MonitorTemplate
@@ -57,9 +29,12 @@ export function applyTemplateToDraft(
     enabled: defaults.enabled ?? false,
     provider: defaults.provider,
     sender_rules: defaults.sender_rules ?? [],
+    from_contains: defaults.from_contains ?? '',
+    subject_contains: defaults.subject_contains ?? '',
     subject_regex: defaults.subject_regex ?? '',
     body_regex: defaults.body_regex ?? '',
-    allowed_event_types: mapEventFamilies(defaults.event_family_prefixes),
+    gmail_label: defaults.gmail_label ?? '',
+    allowed_event_types: defaults.allowed_event_types ?? [],
     scope: 'all',
     mail_account_ids: []
   };

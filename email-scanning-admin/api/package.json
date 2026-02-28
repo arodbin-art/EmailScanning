@@ -9,7 +9,10 @@
   "scripts": {
     "dev": "node --no-warnings --loader ts-node/esm src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "test:templates": "node --test --no-warnings --loader ts-node/esm src/templates.test.ts src/templates.routes.test.ts",
+    "test:auth": "node --test --no-warnings --loader ts-node/esm src/auth.test.ts",
+    "test:templates:routes": "node --test --no-warnings --loader ts-node/esm src/templates.routes.test.ts",
+    "test:templates": "node --test --no-warnings --loader ts-node/esm src/templates.test.ts",
+    "test": "npm run test:auth && npm run test:templates",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate --schema ./prisma/schema.prisma",
     "start:vault": "./scripts/run_with_hcv.sh node dist/index.js",

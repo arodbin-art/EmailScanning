@@ -1,9 +1,12 @@
 import 'dotenv/config';
 import { validateSchemaOrThrow } from './db.js';
 import { createApp } from './app.js';
+import { validateAdminAuthConfigOrThrow } from './auth.js';
 
-if (!process.env.ADMIN_TOKEN) {
-  console.error('Startup failed: ADMIN_TOKEN is required.');
+try {
+  validateAdminAuthConfigOrThrow();
+} catch (err) {
+  console.error('Startup failed:', err instanceof Error ? err.message : err);
   process.exit(1);
 }
 

@@ -35,6 +35,7 @@ COPY --from=build /app/api/package.json /app/api/package-lock.json ./api/
 COPY --from=build /app/api/node_modules ./api/node_modules
 COPY --from=build /app/api/dist ./api/dist
 COPY --from=build /app/api/prisma ./api/prisma
+COPY --from=build /app/api/templates ./api/templates
 
 # UI dist served by API via UI_DIST_PATH
 COPY --from=build /app/ui/dist ./ui-dist
@@ -43,4 +44,3 @@ ENV UI_DIST_PATH=/app/ui-dist
 ENV PORT=4000
 EXPOSE 4000
 CMD ["node", "api/dist/index.js"]
-

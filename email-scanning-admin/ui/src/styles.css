@@ -60,6 +60,10 @@ a {
   gap: 12px;
 }
 
+.sidebar-footer {
+  margin-top: auto;
+}
+
 .nav-link {
   padding: 10px 12px;
   border-radius: 10px;
@@ -207,6 +211,56 @@ a {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--ink);
+}
+
+.auth-controls {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.auth-button {
+  padding: 6px 10px;
+  color: #f8f8f2;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.auth-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.auth-status {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-status.signed-in {
+  color: #86efac;
+}
+
+.auth-status.signed-out {
+  color: #fda4af;
+}
+
+.auth-user {
+  font-size: 12px;
+  color: #d8dee9;
+}
+
+.auth-error {
+  font-size: 12px;
+  color: #fecaca;
 }
 
 .button.danger {

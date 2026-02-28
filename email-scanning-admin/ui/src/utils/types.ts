@@ -59,9 +59,13 @@ export type MonitorTemplate = TemplateSummary & {
   monitor_defaults: {
     provider: string;
     sender_rules?: string[] | null;
+    from_contains?: string | null;
+    subject_contains?: string | null;
     subject_regex?: string | null;
     body_regex?: string | null;
+    gmail_label?: string | null;
     event_family_prefixes?: string[] | null;
+    allowed_event_types?: string[] | null;
     enabled?: boolean;
   };
 };

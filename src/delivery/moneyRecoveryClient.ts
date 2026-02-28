@@ -1,5 +1,7 @@
 import { DeliveryClient, DeliveryResult, OutboxDeliveryInput } from "./types.js"
-import { MANULIFE_EVENT_TYPES } from "../events/signalEvents.js"
+import { MANULIFE_EVENT_TYPES, ORTHODONTICS_EVENT_TYPES } from "../events/signalEvents.js"
+import { createObjectStorage, resolveStorageProvider } from "../storage/index.js"
+import { ObjectStorage } from "../storage/objectStorage.js"
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 type TokenProvider = () => Promise<string | undefined>
@@ -37,22 +39,45 @@ type ManulifeEventContext = {
   } | null
 }
 
+type OrthodonticsAttachmentRef = {
+  filename: string
+  mimeType: string | null
+  sizeBytes: number | null
+  objectKey: string
+}
+
+type OrthodonticsEventContext = {
+  personCodeHint: string | null
+  providerLabel: string
+  amountTotal: number | null
+  transactionId: string | null
+  statusText: string | null
+  emailSubject: string | null
+  emailReceivedAt: string | null
+  attachments: OrthodonticsAttachmentRef[]
+}
+
 export class MoneyRecoveryClient implements DeliveryClient {
   private readonly baseUrl: string
   private readonly bearerToken?: string
   private readonly tokenProvider?: TokenProvider
   private readonly timeoutMs: number
+  private attachmentStorage: ObjectStorage | null
+  private attachmentStorageInitialized: boolean
 
   constructor(params: {
     baseUrl: string
     bearerToken?: string
     timeoutMs?: number
     tokenProvider?: TokenProvider
+    attachmentStorage?: ObjectStorage | null
   }) {
     this.baseUrl = params.baseUrl.replace(/\/$/, "")
     this.bearerToken = params.bearerToken
     this.tokenProvider = params.tokenProvider
     this.timeoutMs = params.timeoutMs ?? 10000
+    this.attachmentStorage = params.attachmentStorage ?? null
+    this.attachmentStorageInitialized = params.attachmentStorage !== undefined
   }
 
   async deliverOutboxEvent(input: OutboxDeliveryInput): Promise<DeliveryResult> {
@@ -61,6 +86,9 @@ export class MoneyRecoveryClient implements DeliveryClient {
     }
     if (input.eventType.startsWith("manulife.")) {
       return this.deliverManulifeEvent(input)
+    }
+    if (input.eventType.startsWith("orthodontics.")) {
+      return this.deliverOrthodonticsEvent(input)
     }
     return {
       status: "needs_review",
@@ -139,6 +167,88 @@ export class MoneyRecoveryClient implements DeliveryClient {
         event_type: input.eventType,
         claim_id: manulife.claimId,
         created: resolved.created,
+      },
+    }
+  }
+
+  private async deliverOrthodonticsEvent(input: OutboxDeliveryInput): Promise<DeliveryResult> {
+    if (
+      input.eventType === ORTHODONTICS_EVENT_TYPES.APPOINTMENT_SCHEDULED ||
+      input.eventType === ORTHODONTICS_EVENT_TYPES.APPOINTMENT_REMINDER
+    ) {
+      return {
+        status: "accepted",
+        raw: {
+          reason: "non_financial_signal",
+          event_type: input.eventType,
+          source_event_id: input.eventId,
+        },
+      }
+    }
+
+    if (input.eventType !== ORTHODONTICS_EVENT_TYPES.PAYMENT_APPROVED) {
+      return {
+        status: "needs_review",
+        raw: { reason: "unsupported_event_type", event_type: input.eventType },
+      }
+    }
+
+    const orthodontics = this.toOrthodonticsContext(input.payload ?? {})
+    const personCode =
+      normalizePersonCode(input.mailAccountPersonCode) ??
+      normalizePersonCode(orthodontics.personCodeHint)
+    if (!personCode) {
+      return {
+        status: "needs_review",
+        raw: {
+          reason: "missing_person_code_mapping_for_mail_account",
+          event_type: input.eventType,
+          mail_account_id: input.mailAccountId,
+          source_email_id: input.sourceEmailId,
+        },
+      }
+    }
+
+    const resolved = await this.resolveRviForOrthodonticsEvent({
+      input,
+      orthodontics,
+      personCode,
+    })
+    if (resolved.kind === "error") {
+      return resolved.result
+    }
+
+    const warnings: string[] = []
+    if (orthodontics.attachments.length > 0) {
+      const uploadWarnings = await this.tryUploadOrthodonticsArtifacts({
+        rviId: resolved.rviId,
+        personCode,
+        attachments: orthodontics.attachments,
+      })
+      warnings.push(...uploadWarnings)
+    }
+
+    const memoApplied = await this.tryAppendOrthodonticsMemo({
+      rviId: resolved.rviId,
+      sourceEventId: input.eventId,
+    })
+    if (!memoApplied.ok && memoApplied.warning) {
+      warnings.push(memoApplied.warning)
+    }
+
+    return {
+      status: "accepted",
+      raw: {
+        source_event_id: input.eventId,
+        event_type: input.eventType,
+        rvi_id: resolved.rviId,
+        linked: true,
+        created: resolved.created,
+        transaction_id: orthodontics.transactionId,
+        provider_name: orthodontics.providerLabel,
+        amount_total: orthodontics.amountTotal,
+        attachments_count: orthodontics.attachments.length,
+        delivery_warnings: warnings,
       },
     }
   }
@@ -303,6 +413,319 @@ export class MoneyRecoveryClient implements DeliveryClient {
           source_email_id: input.sourceEmailId,
         },
       },
+    }
+  }
+
+  private async resolveRviForOrthodonticsEvent(params: {
+    input: OutboxDeliveryInput
+    orthodontics: OrthodonticsEventContext
+    personCode: string
+  }): Promise<{ kind: "ok"; rviId: number; created: boolean } | { kind: "error"; result: DeliveryResult }> {
+    const { input, orthodontics, personCode } = params
+    const transactionId = orthodontics.transactionId
+    if (transactionId) {
+      const lookup = await this.lookupExternalReference(transactionId, "orthodontics_txn_id")
+      if (lookup.kind === "error") return lookup
+      if (lookup.rviIds.length > 1) {
+        return {
+          kind: "error",
+          result: {
+            status: "needs_review",
+            raw: {
+              reason: "ambiguous_match",
+              event_type: input.eventType,
+              transaction_id: transactionId,
+              rvi_ids: lookup.rviIds,
+            },
+          },
+        }
+      }
+      if (lookup.rviIds.length === 1) {
+        const rviId = lookup.rviIds[0]
+        const ensured = await this.ensureExternalReference(rviId, "orthodontics_txn_id", transactionId)
+        if (ensured.kind === "error") return ensured
+        return { kind: "ok", rviId, created: false }
+      }
+    }
+
+    const candidates = await this.findOrthodonticsInsuranceCandidates({
+      personCode,
+      amountTotal: orthodontics.amountTotal,
+      providerLabel: orthodontics.providerLabel,
+      eventDateIso: orthodontics.emailReceivedAt ?? undefined,
+      maxAgeDays: 180,
+    })
+    if (candidates.kind === "error") return candidates
+    if (candidates.ids.length > 1) {
+      return {
+        kind: "error",
+        result: {
+          status: "needs_review",
+          raw: {
+            reason: "ambiguous_match",
+            event_type: input.eventType,
+            person_code: personCode,
+            amount_total: orthodontics.amountTotal,
+            provider_name: orthodontics.providerLabel,
+            candidate_ids: candidates.ids,
+          },
+        },
+      }
+    }
+    if (candidates.ids.length === 1) {
+      const rviId = candidates.ids[0]
+      if (transactionId) {
+        const ensured = await this.ensureExternalReference(rviId, "orthodontics_txn_id", transactionId)
+        if (ensured.kind === "error") return ensured
+      }
+      return { kind: "ok", rviId, created: false }
+    }
+
+    const created = await this.createOrthodonticsInsuranceRvi({
+      orthodontics,
+      personCode,
+      sourceEventId: input.eventId,
+    })
+    if (created.kind === "error") return created
+    if (transactionId) {
+      const ensured = await this.ensureExternalReference(
+        created.rviId,
+        "orthodontics_txn_id",
+        transactionId
+      )
+      if (ensured.kind === "error") return ensured
+    }
+    return { kind: "ok", rviId: created.rviId, created: true }
+  }
+
+  private async createOrthodonticsInsuranceRvi(params: {
+    orthodontics: OrthodonticsEventContext
+    personCode: string
+    sourceEventId: number
+  }): Promise<{ kind: "ok"; rviId: number } | { kind: "error"; result: DeliveryResult }> {
+    const amountTotal = params.orthodontics.amountTotal
+    if (amountTotal === null || amountTotal <= 0) {
+      return {
+        kind: "error",
+        result: {
+          status: "needs_review",
+          raw: {
+            reason: "missing_amount_for_orthodontics_autocreate",
+            provider_name: params.orthodontics.providerLabel,
+            transaction_id: params.orthodontics.transactionId,
+          },
+        },
+      }
+    }
+    const purchaseDate =
+      dateOnlyFromIso(params.orthodontics.emailReceivedAt) ?? todayIsoDate()
+    const deadlineDate = addDaysIso(purchaseDate, 365)
+    const memo = truncateMemo(
+      [
+        `${params.orthodontics.providerLabel} (${params.personCode}) - Invoice from email`,
+        params.orthodontics.transactionId
+          ? `transaction_id=${params.orthodontics.transactionId}`
+          : null,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(" | ")
+    )
+
+    const res = await this.requestJson("POST", "/rvi", {
+      type: "insurance",
+      person_code: params.personCode,
+      amount_total: amountTotal,
+      purchase_date: purchaseDate,
+      deadline_date: deadlineDate,
+      memo,
+      source_event_id: params.sourceEventId,
+    })
+    if (!res.ok) {
+      return { kind: "error", result: { status: "rejected", raw: res } }
+    }
+    const rviId = asNumber((res.json as any)?.id)
+    if (!rviId) {
+      return {
+        kind: "error",
+        result: { status: "needs_review", raw: { reason: "bad_create_rvi_response", res } },
+      }
+    }
+    return { kind: "ok", rviId }
+  }
+
+  private async findOrthodonticsInsuranceCandidates(params: {
+    personCode: string
+    amountTotal: number | null
+    providerLabel: string
+    eventDateIso?: string
+    maxAgeDays: number
+  }): Promise<{ kind: "ok"; ids: number[] } | { kind: "error"; result: DeliveryResult }> {
+    const res = await this.requestJson("GET", "/rvi/urgent")
+    if (!res.ok) {
+      return { kind: "error", result: { status: "rejected", raw: res } }
+    }
+    if (!Array.isArray(res.json)) {
+      return {
+        kind: "error",
+        result: { status: "needs_review", raw: { reason: "bad_urgent_response", res } },
+      }
+    }
+    const eventDate = params.eventDateIso ? new Date(params.eventDateIso) : null
+    const providerNeedle = params.providerLabel.trim().toLowerCase()
+    const ids = (res.json as any[])
+      .filter((row) => String(row?.type ?? "").toLowerCase() === "insurance")
+      .filter(
+        (row) =>
+          String(row?.person_code ?? "").trim().toUpperCase() === params.personCode.toUpperCase()
+      )
+      .filter((row) => {
+        const merchant = asString(row?.merchant)?.toLowerCase() ?? ""
+        return merchant.includes("durham orthodontics") || merchant.includes(providerNeedle)
+      })
+      .filter((row) => {
+        if (params.amountTotal === null) return true
+        const amount = asNumber(row?.amount_total)
+        return amount !== null && Math.abs(amount - params.amountTotal) <= 1
+      })
+      .filter((row) => {
+        if (!eventDate) return true
+        const purchase = asString(row?.purchase_date)
+        if (!purchase) return true
+        const purchaseDate = new Date(`${purchase}T00:00:00Z`)
+        if (Number.isNaN(purchaseDate.getTime())) return true
+        const diffDays = Math.abs(eventDate.getTime() - purchaseDate.getTime()) / (24 * 3600 * 1000)
+        return diffDays <= params.maxAgeDays
+      })
+      .map((row) => asNumber(row?.id))
+      .filter((id): id is number => id !== null)
+    return { kind: "ok", ids: Array.from(new Set(ids)) }
+  }
+
+  private async tryUploadOrthodonticsArtifacts(params: {
+    rviId: number
+    personCode: string
+    attachments: OrthodonticsAttachmentRef[]
+  }): Promise<string[]> {
+    const warnings: string[] = []
+    const storage = this.getAttachmentStorage()
+    if (!storage) {
+      return params.attachments.map(
+        (attachment) =>
+          `artifact upload skipped (storage unavailable): ${attachment.filename}`
+      )
+    }
+
+    const existingArtifacts = await this.listRviArtifacts(params.rviId)
+    const existing = new Set(
+      existingArtifacts
+        .map((row) => artifactIdentity(row.filename, row.sizeBytes))
+        .filter((row): row is string => row !== null)
+    )
+
+    for (const attachment of params.attachments) {
+      const identity = artifactIdentity(attachment.filename, attachment.sizeBytes)
+      if (identity && existing.has(identity)) {
+        continue
+      }
+      try {
+        const objectData = await storage.getObject(attachment.objectKey)
+        const contentType =
+          attachment.mimeType ??
+          objectData.contentType ??
+          "application/octet-stream"
+        const form = new FormData()
+        form.set("type", "receipt")
+        form.set("uploaded_by_person_code", params.personCode)
+        const bytes = new Uint8Array(objectData.body)
+        form.set(
+          "file",
+          new Blob([bytes], { type: contentType }),
+          attachment.filename
+        )
+        const res = await this.requestFormData("POST", `/rvi/${params.rviId}/artifacts`, form)
+        if (!res.ok) {
+          warnings.push(
+            `artifact upload failed (${attachment.filename}): http ${res.httpStatus}`
+          )
+          continue
+        }
+        if (identity) {
+          existing.add(identity)
+        }
+      } catch (error) {
+        warnings.push(
+          `artifact upload failed (${attachment.filename}): ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
+      }
+    }
+
+    return warnings
+  }
+
+  private async tryAppendOrthodonticsMemo(params: {
+    rviId: number
+    sourceEventId: number
+  }): Promise<{ ok: boolean; warning?: string }> {
+    const detail = await this.getRviDetail(params.rviId)
+    if (detail.kind === "error") {
+      return { ok: false, warning: `memo update skipped: unable to load RVI ${params.rviId}` }
+    }
+
+    const existingMemo = asString((detail.data as any)?.memo)
+    const memoLine =
+      "Orthodontics: invoice received via email. Plan: WSIB(ML) 50%, then OCT(ML) 50% after COB."
+    if (existingMemo?.includes(memoLine)) {
+      return { ok: true }
+    }
+
+    const memo = appendMemoLine(existingMemo, memoLine)
+    if (!memo || memo === existingMemo) {
+      return { ok: true }
+    }
+
+    const res = await this.requestJson("PATCH", `/rvi/${params.rviId}`, {
+      memo,
+      source_event_id: params.sourceEventId,
+    })
+    if (!res.ok) {
+      return {
+        ok: false,
+        warning: `memo update failed for rvi ${params.rviId}: http ${res.httpStatus}`,
+      }
+    }
+    return { ok: true }
+  }
+
+  private async listRviArtifacts(
+    rviId: number
+  ): Promise<Array<{ filename: string; sizeBytes: number | null }>> {
+    const res = await this.requestJson("GET", `/rvi/${rviId}/artifacts`)
+    if (!res.ok || !Array.isArray(res.json)) {
+      return []
+    }
+    return (res.json as any[])
+      .map((row) => ({
+        filename: asString(row?.filename) ?? "",
+        sizeBytes: asNumber(row?.size_bytes),
+      }))
+      .filter((row) => row.filename.length > 0)
+  }
+
+  private getAttachmentStorage(): ObjectStorage | null {
+    if (this.attachmentStorageInitialized) {
+      return this.attachmentStorage
+    }
+    this.attachmentStorageInitialized = true
+    try {
+      this.attachmentStorage = createObjectStorage({
+        provider: resolveStorageProvider(),
+      })
+      return this.attachmentStorage
+    } catch {
+      this.attachmentStorage = null
+      return null
     }
   }
 
@@ -944,12 +1367,49 @@ export class MoneyRecoveryClient implements DeliveryClient {
     }
   }
 
+  private toOrthodonticsContext(payload: Record<string, unknown>): OrthodonticsEventContext {
+    const orthodontics = (payload as any)?.orthodontics ?? {}
+    return {
+      personCodeHint:
+        asString(payload.person_code_hint) ??
+        asString(orthodontics.person_code_hint),
+      providerLabel:
+        asString(payload.provider_name) ??
+        asString(orthodontics.provider) ??
+        asString(payload.merchant) ??
+        "Durham Orthodontics",
+      amountTotal: inferAmount([
+        payload.amount_total,
+        orthodontics.amount_total,
+        payload.amount,
+      ]),
+      transactionId:
+        asString(payload.transaction_id) ??
+        asString(orthodontics.transaction_id) ??
+        asString(payload.payment_reference) ??
+        asString(orthodontics.payment_reference),
+      statusText:
+        asString(payload.status_text) ?? asString(orthodontics.status_text),
+      emailSubject: asString((payload as any)?.email?.subject),
+      emailReceivedAt:
+        asString(payload.received_at) ??
+        asString((payload as any)?.email?.received_at),
+      attachments: parseOrthodonticsAttachmentRefs(
+        Array.isArray(payload.attachments)
+          ? payload.attachments
+          : Array.isArray(orthodontics.attachments)
+          ? orthodontics.attachments
+          : []
+      ),
+    }
+  }
+
   private async requestJson(
     method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     path: string,
     body?: unknown
   ): Promise<{ ok: boolean; httpStatus: number; json: JsonValue; rawText: string }> {
-    const headers = await this.buildHeaders()
+    const headers = await this.buildHeaders("json")
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
     try {
@@ -967,8 +1427,32 @@ export class MoneyRecoveryClient implements DeliveryClient {
     }
   }
 
-  private async buildHeaders(): Promise<Record<string, string>> {
-    const headers: Record<string, string> = { "Content-Type": "application/json" }
+  private async requestFormData(
+    method: "POST" | "PATCH",
+    path: string,
+    body: FormData
+  ): Promise<{ ok: boolean; httpStatus: number; json: JsonValue; rawText: string }> {
+    const headers = await this.buildHeaders("form")
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        body,
+        signal: controller.signal,
+      })
+      const rawText = await res.text()
+      const json = safeJson(rawText)
+      return { ok: res.ok, httpStatus: res.status, json, rawText }
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  private async buildHeaders(kind: "json" | "form"): Promise<Record<string, string>> {
+    const headers: Record<string, string> =
+      kind === "json" ? { "Content-Type": "application/json" } : {}
     const dynamicToken = this.tokenProvider ? await this.tokenProvider() : undefined
     const token = dynamicToken ?? this.bearerToken
     if (token) {
@@ -1160,6 +1644,44 @@ function clamp01(value: number): number {
 
 function truncateMemo(value: string, maxLength = 200): string {
   return value.length <= maxLength ? value : value.slice(0, maxLength)
+}
+
+function parseOrthodonticsAttachmentRefs(value: unknown): OrthodonticsAttachmentRef[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null
+      const row = entry as Record<string, unknown>
+      const objectKey = asString(row.object_key) ?? asString(row.objectKey)
+      if (!objectKey) return null
+      const filename = asString(row.filename) ?? fileNameFromObjectKey(objectKey)
+      const mimeType = asString(row.mime_type) ?? asString(row.mimeType)
+      const sizeBytes = asNumber(row.size_bytes ?? row.sizeBytes)
+      return {
+        filename,
+        mimeType,
+        sizeBytes,
+        objectKey,
+      } satisfies OrthodonticsAttachmentRef
+    })
+    .filter((entry): entry is OrthodonticsAttachmentRef => entry !== null)
+}
+
+function artifactIdentity(filename: string | null, sizeBytes: number | null): string | null {
+  if (!filename) return null
+  const normalizedName = filename.trim().toLowerCase()
+  if (!normalizedName) return null
+  const normalizedSize = sizeBytes === null ? "na" : String(sizeBytes)
+  return `${normalizedName}:${normalizedSize}`
+}
+
+function fileNameFromObjectKey(objectKey: string): string {
+  const normalized = objectKey.trim()
+  if (!normalized) return "attachment"
+  const parts = normalized.split("/")
+  return parts[parts.length - 1] || "attachment"
 }
 
 function isReturnFlowManualReviewError(res: {

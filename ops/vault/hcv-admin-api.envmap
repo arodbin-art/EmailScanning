@@ -1,3 +1,5 @@
 # ENV_VAR=canonical/id
 DATABASE_URL=signal-engine/dev/postgres_url
-ADMIN_TOKEN=signal-engine/dev/admin_token
+ADMIN_AUTH_MODE=signal-engine/dev/admin_auth_mode
+ADMIN_ENTRA_TENANT_ID=signal-engine/dev/entra_tenant_id
+ADMIN_ENTRA_AUDIENCE=signal-engine/dev/admin_entra_audience

@@ -2,6 +2,12 @@ const CONFIGURED_API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undef
 const COMPILED_ADMIN_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN as string | undefined) || '';
 
 function resolveAdminToken(): string {
+  if (typeof window !== 'undefined') {
+    const msalStored = window.localStorage.getItem('authToken');
+    if (msalStored && msalStored.trim().length > 0) {
+      return msalStored.trim();
+    }
+  }
   if (COMPILED_ADMIN_TOKEN) {
     return COMPILED_ADMIN_TOKEN;
   }

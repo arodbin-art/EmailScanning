@@ -7,7 +7,11 @@ export type MonitorTemplateDefaults = {
   sender_rules?: string[] | null;
   subject_regex?: string | null;
   body_regex?: string | null;
+  from_contains?: string | null;
+  subject_contains?: string | null;
+  gmail_label?: string | null;
   event_family_prefixes?: string[] | null;
+  allowed_event_types?: string[] | null;
   enabled?: boolean;
 };
 
@@ -80,10 +84,31 @@ function parseTemplate(record: unknown, index: number): MonitorTemplateRecord {
         monitorDefaults.body_regex === null || monitorDefaults.body_regex === undefined
           ? null
           : assertString(monitorDefaults.body_regex, `templates[${index}].monitor_defaults.body_regex`),
+      from_contains:
+        monitorDefaults.from_contains === null || monitorDefaults.from_contains === undefined
+          ? null
+          : assertString(monitorDefaults.from_contains, `templates[${index}].monitor_defaults.from_contains`),
+      subject_contains:
+        monitorDefaults.subject_contains === null || monitorDefaults.subject_contains === undefined
+          ? null
+          : assertString(
+              monitorDefaults.subject_contains,
+              `templates[${index}].monitor_defaults.subject_contains`
+            ),
+      gmail_label:
+        monitorDefaults.gmail_label === null || monitorDefaults.gmail_label === undefined
+          ? null
+          : assertString(monitorDefaults.gmail_label, `templates[${index}].monitor_defaults.gmail_label`),
       event_family_prefixes: monitorDefaults.event_family_prefixes
         ? assertStringArray(
             monitorDefaults.event_family_prefixes,
             `templates[${index}].monitor_defaults.event_family_prefixes`
+          )
+        : null,
+      allowed_event_types: monitorDefaults.allowed_event_types
+        ? assertStringArray(
+            monitorDefaults.allowed_event_types,
+            `templates[${index}].monitor_defaults.allowed_event_types`
           )
         : null,
       enabled:
@@ -124,6 +149,7 @@ function resolveTemplatesFilePath(): string {
   }
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
+    path.resolve(process.cwd(), 'api', 'templates', 'templates.json'),
     path.resolve(process.cwd(), 'templates', 'templates.json'),
     path.resolve(process.cwd(), 'email-scanning-admin', 'api', 'templates', 'templates.json'),
     path.resolve(moduleDir, '..', 'templates', 'templates.json')

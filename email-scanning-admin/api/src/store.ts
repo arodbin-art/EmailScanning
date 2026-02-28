@@ -359,7 +359,7 @@ export async function getMailAccountProviders(ids: number[]): Promise<string[]> 
 
 export async function listEvents(input: {
   status?: EventsOutboxStatus;
-  eventTypePrefix?: "amazon" | "manulife";
+  eventTypePrefix?: "amazon" | "manulife" | "orthodontics";
   limit?: number;
 }): Promise<EventRecord[]> {
   const filters: Prisma.Sql[] = [];

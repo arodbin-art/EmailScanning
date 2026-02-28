@@ -80,7 +80,7 @@ export default function TemplatesPage() {
               </div>
               {selectedTemplate.id === 'durham-orthodontics-approved-payment' && (
                 <div className="notice">
-                  Requires parser orthodontics.payment_approved
+                  Delivery mapping for orthodontics events is optional and can be added separately.
                 </div>
               )}
             </div>

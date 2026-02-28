@@ -19,8 +19,14 @@ import {
   parseManulifeClaimEmail,
 } from "../automation/manulifeClaimParser.js"
 import {
+  extractOrthodonticsAttachmentRefs,
+  parseOrthodonticsPaymentEmail,
+} from "../automation/orthodonticsPaymentParser.js"
+import { parseOrthodonticsAppointmentEmail } from "../automation/orthodonticsAppointmentParser.js"
+import {
   AMAZON_EVENT_TYPES,
   MANULIFE_EVENT_TYPES,
+  ORTHODONTICS_EVENT_TYPES,
   buildSignalEventDedupeKey,
 } from "../events/signalEvents.js"
 import { DeterministicProvider } from "../intelligence/deterministicProvider.js"
@@ -142,7 +148,12 @@ export class EmailIngestionService {
   }
 
   private async ingestMessage(
-    account: { id: number; provider: string; enabled: boolean },
+    account: {
+      id: number
+      provider: string
+      enabled: boolean
+      moneyRecoveryPersonCode: string | null
+    },
     provider: EmailProvider,
     context: PollContext,
     providerMessageId: string
@@ -268,9 +279,11 @@ export class EmailIngestionService {
     await this.emitDeterministicSignalEvent({
       emailId: createdEmail.id,
       mailAccountId: account.id,
+      mailAccountPersonCode: account.moneyRecoveryPersonCode ?? null,
       provider: provider.provider,
       message,
       normalizedBody: normalized,
+      attachmentMetadata,
     })
     try {
       await persistAiCandidateSignals({
@@ -496,23 +509,31 @@ export class EmailIngestionService {
   private async emitDeterministicSignalEvent(params: {
     emailId: number
     mailAccountId: number
+    mailAccountPersonCode: string | null
     provider: string
     message: ProviderMessage
     normalizedBody: string
+    attachmentMetadata: Record<string, unknown>
   }): Promise<void> {
     const amazonEmitted = await this.emitAmazonReturnEvent(params)
     if (amazonEmitted) {
       return
     }
-    await this.emitManulifeClaimEvent(params)
+    const manulifeEmitted = await this.emitManulifeClaimEvent(params)
+    if (manulifeEmitted) {
+      return
+    }
+    await this.emitOrthodonticsEvent(params)
   }
 
   private async emitAmazonReturnEvent(params: {
     emailId: number
     mailAccountId: number
+    mailAccountPersonCode: string | null
     provider: string
     message: ProviderMessage
     normalizedBody: string
+    attachmentMetadata: Record<string, unknown>
   }): Promise<boolean> {
     const parsed = parseAmazonReturnEmail({
       provider: params.provider,
@@ -621,9 +642,11 @@ export class EmailIngestionService {
   private async emitManulifeClaimEvent(params: {
     emailId: number
     mailAccountId: number
+    mailAccountPersonCode: string | null
     provider: string
     message: ProviderMessage
     normalizedBody: string
+    attachmentMetadata: Record<string, unknown>
   }): Promise<boolean> {
     const parsed = parseManulifeClaimEmail({
       provider: params.provider,
@@ -749,6 +772,127 @@ export class EmailIngestionService {
       payload,
       sourceEmailId: params.emailId,
       confidence: parsed.claimId ? 0.99 : 0.9,
+    })
+    return true
+  }
+
+  private async emitOrthodonticsEvent(params: {
+    emailId: number
+    mailAccountId: number
+    mailAccountPersonCode: string | null
+    provider: string
+    message: ProviderMessage
+    normalizedBody: string
+    attachmentMetadata: Record<string, unknown>
+  }): Promise<boolean> {
+    const payment = parseOrthodonticsPaymentEmail({
+      provider: params.provider,
+      fromAddress: params.message.fromAddress,
+      subject: params.message.subject ?? undefined,
+      receivedAt: params.message.receivedAt,
+      normalizedBody: params.normalizedBody,
+    })
+
+    if (payment) {
+      const attachmentRefs = extractOrthodonticsAttachmentRefs(params.attachmentMetadata)
+      const personCodeHint = normalizePersonCode(params.mailAccountPersonCode) ?? "CHA"
+      const payload = this.buildCommonSignalPayload({
+        provider: params.provider,
+        mailAccountId: params.mailAccountId,
+        sourceEmailId: params.emailId,
+        message: params.message,
+        confidence: 0.98,
+        base: {
+          merchant: payment.merchant,
+          provider_name: payment.merchant,
+          person_code_hint: personCodeHint,
+          amount_total: payment.amount,
+          currency: payment.currency,
+          transaction_id: payment.transactionId ?? null,
+          status_text: payment.statusText,
+          payment_reference: payment.paymentReference ?? null,
+          attachments: attachmentRefs,
+          orthodontics: {
+            provider: payment.merchant,
+            amount_total: payment.amount,
+            currency: payment.currency,
+            transaction_id: payment.transactionId ?? null,
+            payment_reference: payment.paymentReference ?? null,
+            status_text: payment.statusText,
+            attachments: attachmentRefs,
+          },
+        },
+      })
+
+      const subjectFallback = (params.message.subject ?? "").trim().toLowerCase()
+      const receivedDate = params.message.receivedAt.toISOString().slice(0, 10)
+      const primaryRef =
+        payment.transactionId ??
+        `${subjectFallback || "approved payment"}|${payment.amount ?? ""}|${receivedDate}`
+      const dedupeKey = buildSignalEventDedupeKey({
+        provider: params.provider,
+        mailAccountId: params.mailAccountId,
+        eventType: ORTHODONTICS_EVENT_TYPES.PAYMENT_APPROVED,
+        primaryRef,
+        primaryAmount: payment.amount,
+        primaryDate: receivedDate,
+      })
+
+      await this.createOutboxEvent({
+        dedupeKey,
+        eventType: ORTHODONTICS_EVENT_TYPES.PAYMENT_APPROVED,
+        payload,
+        sourceEmailId: params.emailId,
+        confidence: 0.98,
+      })
+      return true
+    }
+
+    const appointment = parseOrthodonticsAppointmentEmail({
+      provider: params.provider,
+      fromAddress: params.message.fromAddress,
+      subject: params.message.subject ?? undefined,
+      receivedAt: params.message.receivedAt,
+      normalizedBody: params.normalizedBody,
+    })
+    if (!appointment) {
+      return false
+    }
+
+    const payload = this.buildCommonSignalPayload({
+      provider: params.provider,
+      mailAccountId: params.mailAccountId,
+      sourceEmailId: params.emailId,
+      message: params.message,
+      confidence: 0.95,
+      base: {
+        merchant: "Durham Orthodontics",
+        provider_name: "Durham Orthodontics",
+        person_code_hint: normalizePersonCode(params.mailAccountPersonCode) ?? "CHA",
+        status_text: appointment.statusText,
+        reminder_window: appointment.reminderWindow ?? null,
+        orthodontics: {
+          clinic: appointment.clinic,
+          status_text: appointment.statusText,
+          reminder_window: appointment.reminderWindow ?? null,
+        },
+      },
+    })
+
+    const dedupeKey = buildSignalEventDedupeKey({
+      provider: params.provider,
+      mailAccountId: params.mailAccountId,
+      eventType: appointment.eventType,
+      primaryRef: params.message.messageId,
+      primaryDate: params.message.receivedAt.toISOString().slice(0, 10),
+    })
+
+    await this.createOutboxEvent({
+      dedupeKey,
+      eventType: appointment.eventType,
+      payload,
+      sourceEmailId: params.emailId,
+      confidence: 0.95,
     })
     return true
   }
@@ -998,6 +1142,12 @@ export class EmailIngestionService {
     })
   }
 
+}
+
+function normalizePersonCode(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim().toUpperCase()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 type EmitEventParams = {

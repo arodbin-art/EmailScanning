@@ -33,6 +33,31 @@ Status: COMPLETE
   - API registry load/validation test (`email-scanning-admin/api/src/templates.test.ts`)
   - UI prefill mapping test (`email-scanning-admin/ui/src/utils/templatePrefillTest.ts`)
 
+## 2026-02-27 - Admin Entra ID authentication support
+Status: COMPLETE
+- Added configurable admin auth modes in API:
+  - `ADMIN_AUTH_MODE=token|entra|hybrid`
+  - `token`: static `ADMIN_TOKEN` validation (existing behavior)
+  - `entra`: Entra JWT validation (issuer + audience + RS256 signature via JWKS)
+  - `hybrid`: accept either static token or Entra JWT
+- Added Entra validation env support:
+  - `ADMIN_ENTRA_AUDIENCE`
+  - `ADMIN_ENTRA_TENANT_ID` (or `ADMIN_ENTRA_ISSUER`)
+- Startup validation now checks auth-mode requirements.
+- Added tests:
+  - `email-scanning-admin/api/src/auth.test.ts`
+  - covers token mode and Entra-mode JWT validation with mocked OpenID config/JWKS.
+
+## 2026-02-27 - Entra-only runtime hardening (admin)
+Status: IN PROGRESS
+- Updated vault runtime mappings for admin services:
+  - `ops/vault/hcv-admin-api.envmap` now maps Entra config (`ADMIN_AUTH_MODE`, `ADMIN_ENTRA_TENANT_ID`, `ADMIN_ENTRA_AUDIENCE`) and removes `ADMIN_TOKEN`.
+  - `ops/vault/hcv-admin-ui.envmap` no longer injects `VITE_ADMIN_TOKEN`.
+- Goal is full Entra-only external auth (`ADMIN_AUTH_MODE=entra`) with no static token fallback.
+- Pending deployment step:
+  - apply/update Azure Container App env vars for `email-scanning-admin-dev`.
+  - blocked in current session due DNS/network restriction to `management.azure.com`.
+
 ## 2026-02-27 - Manulife AI review score surfaced end-to-end
 Status: COMPLETE
 - Added `AiReview` contract + scoring helpers:
@@ -770,3 +795,82 @@ Progress: 2026-02-22T20:20:00Z
   - auto-create memo is truncated to 200 chars before POST `/rvi`
   - return-flow readiness/artifact 400s are classified as `needs_review` (not `rejected`)
 - Tightened Admin Mail Account validation for `moneyrecovery_person_code` to exact 3-letter uppercase format.
+
+Progress: 2026-02-28T01:39:00Z
+- Switched Azure `email-scanning-admin-dev` to Entra-only auth mode.
+- Applied env vars: `ADMIN_AUTH_MODE=entra`, `ADMIN_ENTRA_TENANT_ID`, `ADMIN_ENTRA_AUDIENCE`.
+- Removed static token auth config from Azure Container App (`ADMIN_TOKEN`, `TOKEN_ROTATED_AT`, `admin-token` secret).
+- Deployed admin API/UI image with Entra bearer validation and verified unauthorized requests return `401`.
+- Live ready revision: `email-scanning-admin-dev--0000008`.
+
+Progress: 2026-02-28T02:20:00Z
+- Added Entra/MSAL login UX to Email Scanning Admin UI (pattern aligned with MoneyRecovery UI):
+  - sidebar `Login` / `Logout` control
+  - signed-in user name display
+  - automatic token acquisition/storage and API auth header wiring
+- UI now prioritizes `localStorage.authToken` (MSAL) for API calls, with fallback to legacy `email_scanning_admin_token`.
+- Added MSAL UI env overrides (`VITE_ENTRA_TENANT_ID`, `VITE_UI_CLIENT_ID`, `VITE_ENTRA_API_CLIENT_ID`, `VITE_API_SCOPE`, `VITE_REDIRECT_URI`).
+- Validation: `cd email-scanning-admin/ui && npm run build` passed.
+
+Progress: 2026-02-28T02:33:00Z
+- Fixed Entra sign-in redirect mismatch (`AADSTS50011`) for admin UI client `a3338ab1-ddb2-4c50-831d-051549e314cc`.
+- Updated app registration SPA redirect URIs to include:
+  - `https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io`
+  - `https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/`
+
+Progress: 2026-02-28T02:50:00Z
+- Fixed post-login `Unauthorized` state in admin UI by aligning API token validation with MoneyRecovery:
+  - accepted issuer claims from both Entra formats (`sts.windows.net/<tenant>/` and `login.microsoftonline.com/<tenant>/v2.0`)
+  - accepted audience claims in both forms (`api://<app-id>` and `<app-id>`)
+- Deployed `email-scanning-admin-dev` revision `email-scanning-admin-dev--0000010` with auth verifier update.
+
+Progress: 2026-02-28T03:18:00Z
+- Implemented orthodontics payment ingestion payload upgrade and MoneyRecovery delivery translator.
+- Orthodontics ingestion updates:
+  - `orthodontics.payment_approved` now emits `transaction_id`, `person_code_hint`, and normalized `attachments` with `object_key` for artifact upload.
+  - Dedupe for payment-approved now uses transaction ID when present; fallback uses subject+amount+received date (deterministic).
+  - Parser keeps legacy `payment_reference` while standardizing on `transactionId`.
+- MoneyRecovery delivery updates:
+  - Added orthodontics delivery path for `orthodontics.payment_approved`:
+    - resolve person code (mailbox mapping first, then payload hint)
+    - match by external ref `orthodontics_txn_id`
+    - fallback candidate match by person+amount+provider in recent urgent insurance RVIs
+    - auto-create insurance RVI when no match, then attach external reference
+    - upload email attachment artifacts (`receipt`) from object storage object keys
+    - append memo line: `Orthodontics: invoice received via email. Plan: WSIB(ML) 50%, then OCT(ML) 50% after COB.`
+  - Added non-financial handling:
+    - `orthodontics.appointment_scheduled` and `orthodontics.appointment_reminder` are now marked delivered with `reason=non_financial_signal` (no MoneyRecovery API call).
+  - Artifact upload failures are non-blocking and returned as `delivery_warnings`.
+- Files changed:
+  - `src/automation/orthodonticsPaymentParser.ts`
+  - `src/automation/orthodonticsPaymentParserTest.ts`
+  - `src/automation/orthodonticsPaymentReplay.ts`
+  - `src/ingestion/emailIngestionService.ts`
+  - `src/intelligence/deterministicProvider.ts`
+  - `src/events/signalEvents.ts`
+  - `src/delivery/moneyRecoveryClient.ts`
+  - `src/delivery/moneyRecoveryClientTest.ts`
+- Validation:
+  - `npm run build` => PASS
+  - `npm run test:orthodontics` => PASS
+  - `npm run test:delivery:money-recovery` => PASS
+  - `npm run test:amazon:return-parser` => PASS
+  - `npm run test:manulife` => PASS
+- Runtime smoke commands (ops):
+  - `npm run poll -- --provider gmail --limit 5`
+  - `npm run deliver`
+
+Progress: 2026-02-28T03:27:00Z
+- Closed orthodontics delivery smoke test loop with live data.
+- Reprocessed pending historical orthodontics events (`id` 9-14):
+  - `orthodontics.payment_approved` now delivers and links to RVI `20`.
+  - `orthodontics.appointment_*` events deliver as `non_financial_signal` (no MoneyRecovery mutation).
+- Delivery log snapshot for event `9` now shows:
+  - `linked=true`
+  - `created=false` (idempotent replay)
+  - `transaction_id=011225O3B-1B7C02C5-9366-4AC9-BE03-B811E956FE2C`
+  - `delivery_warnings=[]`
+- Validation rerun:
+  - `npm run build` => PASS
+  - `npm run test:orthodontics` => PASS
+  - `npm run test:delivery:money-recovery` => PASS

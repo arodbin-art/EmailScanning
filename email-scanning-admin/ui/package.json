@@ -14,6 +14,8 @@
     "preview:vault": "./scripts/run_with_hcv.sh vite preview"
   },
   "dependencies": {
+    "@azure/msal-browser": "^4.26.1",
+    "@azure/msal-react": "^3.0.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2"

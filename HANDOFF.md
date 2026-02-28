@@ -95,6 +95,10 @@ Last updated: 2026-02-27T05:23:30Z
   - `/admin/monitors` uses `Create from template` instead of hardcoded add buttons.
   - Includes `amazon-default`, `manulife-claims`, and `durham-orthodontics-approved-payment`.
 - Event family filters remain available on `/admin/events`.
+- Admin API auth now supports Entra ID JWTs:
+  - `ADMIN_AUTH_MODE=token|entra|hybrid`
+  - Entra mode validates issuer/audience/signature using OIDC discovery + JWKS
+  - static admin token path remains available for backward compatibility.
 - Admin Events page now shows Manulife AI review summary and detail values (`baselineScore`, `igptScore`, `flags`, `rationale`).
 - Azure deployment completed for this change set:
   - `signal-engine` image: `emailscanacr354705.azurecr.io/signal-engine:manual-manulife-ai-review-20260227-051213`
@@ -140,7 +144,9 @@ Last updated: 2026-02-27T05:23:30Z
 - Container App: email-scanning-admin-dev
 - URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/dashboard
 - Notes:
-- API requires ADMIN_TOKEN; UI can read runtime token from localStorage key `email_scanning_admin_token`.
+- API supports `ADMIN_AUTH_MODE=token|entra|hybrid`; use `entra` for full external protection.
+- In Entra mode, static ADMIN_TOKEN is not used.
+- UI reads runtime bearer token from localStorage key `email_scanning_admin_token`.
 - Events page URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/events
 
 ## Azure dev deployment
@@ -220,6 +226,21 @@ Last updated: 2026-02-27T05:23:30Z
   - `amazon.return_requested`: delivered (1)
   - `amazon.return_dropped_off`: needs_review (1, return flow not ready)
 - Admin validation now enforces `moneyrecovery_person_code` as exact 3-letter uppercase code.
+
+## Admin auth hardening (2026-02-28)
+- `email-scanning-admin-dev` is now Entra-only in Azure Container Apps.
+- Runtime env:
+  - `ADMIN_AUTH_MODE=entra`
+  - `ADMIN_ENTRA_TENANT_ID=68c5da70-0623-45da-aee1-f64aef4a5ceb`
+  - `ADMIN_ENTRA_AUDIENCE=api://a6167d86-539d-425d-8c6e-0d464d90ec07`
+- Removed static admin token mode from deployed app config:
+  - removed env `ADMIN_TOKEN`, `TOKEN_ROTATED_AT`
+  - removed secret `admin-token`
+- Current live admin revision: `email-scanning-admin-dev--0000010`.
+- Auth validation:
+  - no bearer token => `401 Unauthorized`
+  - invalid bearer token => `401 Unauthorized`
+- Entra token validation now accepts both tenant issuer formats (`sts.windows.net/<tenant>/` and `login.microsoftonline.com/<tenant>/v2.0`) and audience forms (`api://<app-id>` and raw `<app-id>`), matching MoneyRecovery behavior.
 
 ## Next steps
 - Keep mail account person mapping set to a valid code (`ROD|PRI|CHA|YAS|ADR`) in Admin Hub (`/admin/mail-accounts`).

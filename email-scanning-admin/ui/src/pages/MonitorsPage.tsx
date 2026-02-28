@@ -175,7 +175,7 @@ export default function MonitorsPage() {
             ))}
           </select>
           <button className="button secondary" onClick={createFromTemplate}>
-            Create from template
+            Add template
           </button>
           <button className="button ghost" onClick={() => navigate('/admin/templates')}>
             View templates

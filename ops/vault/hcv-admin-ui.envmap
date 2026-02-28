@@ -1,2 +1,3 @@
 # ENV_VAR=canonical/id
-VITE_ADMIN_TOKEN=signal-engine/dev/admin_token
+# Intentionally empty for full Entra mode.
+# UI obtains bearer JWT at runtime (localStorage/email_scanning_admin_token).

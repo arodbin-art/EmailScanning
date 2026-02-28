@@ -15,9 +15,32 @@ export const MANULIFE_EVENT_TYPES = {
   CLAIM_STATUS_UPDATE: "manulife.claim_status_update",
 } as const
 
+export const ORTHODONTICS_EVENT_TYPES = {
+  PAYMENT_APPROVED: "orthodontics.payment_approved",
+  APPOINTMENT_SCHEDULED: "orthodontics.appointment_scheduled",
+  APPOINTMENT_REMINDER: "orthodontics.appointment_reminder",
+} as const
+
 export type SignalEventType =
   | (typeof AMAZON_EVENT_TYPES)[keyof typeof AMAZON_EVENT_TYPES]
   | (typeof MANULIFE_EVENT_TYPES)[keyof typeof MANULIFE_EVENT_TYPES]
+  | (typeof ORTHODONTICS_EVENT_TYPES)[keyof typeof ORTHODONTICS_EVENT_TYPES]
+
+export type OrthodonticsAttachmentSignal = {
+  filename: string
+  mime_type: string | null
+  size_bytes: number | null
+  object_key: string
+}
+
+export type OrthodonticsPaymentApprovedPayload = {
+  event_type: typeof ORTHODONTICS_EVENT_TYPES.PAYMENT_APPROVED
+  person_code_hint: string | null
+  provider_name: string
+  amount_total: number | null
+  transaction_id: string | null
+  attachments: OrthodonticsAttachmentSignal[]
+}
 
 type DedupeInput = {
   provider: string

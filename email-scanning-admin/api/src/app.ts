@@ -293,14 +293,14 @@ export function createApp() {
 
       const eventPrefixRaw = typeof req.query.event_prefix === 'string' ? req.query.event_prefix : '';
       const eventPrefix = eventPrefixRaw.trim().toLowerCase();
-      const allowedPrefixes = ['amazon', 'manulife'] as const;
+      const allowedPrefixes = ['amazon', 'manulife', 'orthodontics'] as const;
       const prefixFilter = eventPrefix
         ? allowedPrefixes.includes(eventPrefix as (typeof allowedPrefixes)[number])
           ? (eventPrefix as (typeof allowedPrefixes)[number])
           : null
         : undefined;
       if (prefixFilter === null) {
-        res.status(400).json({ error: 'Invalid event_prefix. Use amazon or manulife.' });
+        res.status(400).json({ error: 'Invalid event_prefix. Use amazon, manulife, or orthodontics.' });
         return;
       }
 

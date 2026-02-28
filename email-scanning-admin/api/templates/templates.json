@@ -13,6 +13,11 @@
         "subject_regex": ".*",
         "body_regex": null,
         "event_family_prefixes": ["amazon."],
+        "allowed_event_types": [
+          "amazon.return_requested",
+          "amazon.return_dropped_off",
+          "amazon.refund_issued"
+        ],
         "enabled": false
       }
     },
@@ -28,6 +33,14 @@
         "subject_regex": "^We've checked your claims$",
         "body_regex": "Your latest claims",
         "event_family_prefixes": ["manulife."],
+        "allowed_event_types": [
+          "manulife.claim_received",
+          "manulife.claim_processed",
+          "manulife.claim_paid",
+          "manulife.claim_denied",
+          "manulife.claim_info_required",
+          "manulife.claim_status_update"
+        ],
         "enabled": false
       }
     },
@@ -43,6 +56,26 @@
         "subject_regex": "^Approved Payment$",
         "body_regex": "Durham Orthodontics Ajax",
         "event_family_prefixes": ["orthodontics."],
+        "allowed_event_types": ["orthodontics.payment_approved"],
+        "enabled": false
+      }
+    },
+    {
+      "id": "durham-orthodontics-appointments",
+      "name": "Durham Orthodontics appointments",
+      "description": "Appointment scheduled and reminder notifications",
+      "tags": ["orthodontics", "appointments"],
+      "version": "1.0.0",
+      "monitor_defaults": {
+        "provider": "gmail",
+        "sender_rules": ["info@durhamorthodontics.ca"],
+        "subject_regex": "(An Orthodontic Appointment Has Been Scheduled|Appointment Reminder)",
+        "body_regex": null,
+        "event_family_prefixes": ["orthodontics."],
+        "allowed_event_types": [
+          "orthodontics.appointment_scheduled",
+          "orthodontics.appointment_reminder"
+        ],
         "enabled": false
       }
     }

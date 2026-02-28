@@ -32,7 +32,7 @@ export default function EventsPage() {
   const [events, setEvents] = useState<SignalEvent[]>([]);
   const [mailAccounts, setMailAccounts] = useState<MailAccount[]>([]);
   const [status, setStatus] = useState<'' | EventStatus>('');
-  const [eventPrefix, setEventPrefix] = useState<'' | 'amazon' | 'manulife'>('');
+  const [eventPrefix, setEventPrefix] = useState<'' | 'amazon' | 'manulife' | 'orthodontics'>('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,12 +88,13 @@ export default function EventsPage() {
           className="select"
           value={eventPrefix}
           onChange={(event) =>
-            setEventPrefix(event.target.value as '' | 'amazon' | 'manulife')
+            setEventPrefix(event.target.value as '' | 'amazon' | 'manulife' | 'orthodontics')
           }
         >
           <option value="">All</option>
           <option value="amazon">Amazon</option>
           <option value="manulife">Manulife</option>
+          <option value="orthodontics">Orthodontics</option>
         </select>
       </div>
 
