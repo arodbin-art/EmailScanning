@@ -29,6 +29,9 @@ function summarizeMonitor(monitor: Monitor) {
   if (monitor.gmail_label) {
     rules.push(`label "${monitor.gmail_label}"`);
   }
+  if (monitor.capture_key) {
+    rules.push(`capture key "${monitor.capture_key}"`);
+  }
   return rules.length > 0 ? rules.join(' · ') : 'No rules defined';
 }
 
@@ -39,7 +42,8 @@ function looksLikeAmazonMonitor(monitor: Monitor): boolean {
     monitor.subject_contains,
     monitor.subject_regex,
     monitor.body_regex,
-    monitor.gmail_label
+    monitor.gmail_label,
+    monitor.capture_key
   ]
     .filter((value): value is string => Boolean(value))
     .map((value) => value.toLowerCase());
@@ -119,6 +123,7 @@ export default function MonitorsPage() {
           name: `${monitor.name} (Copy)`,
           enabled: monitor.enabled,
           provider: monitor.provider,
+          capture_key: monitor.capture_key,
           scope: monitor.scope,
           mail_account_ids: monitor.mail_account_ids,
           sender_rules: monitor.sender_rules,
@@ -176,6 +181,9 @@ export default function MonitorsPage() {
           </select>
           <button className="button secondary" onClick={createFromTemplate}>
             Add template
+          </button>
+          <button className="button secondary" onClick={() => navigate('/admin/filter-drafts/new')}>
+            Create from sample emails
           </button>
           <button className="button ghost" onClick={() => navigate('/admin/templates')}>
             View templates
@@ -240,10 +248,7 @@ export default function MonitorsPage() {
                 <td>{summarizeMonitor(monitor)}</td>
                 <td>
                   <div className="button-group">
-                    <button
-                      className="button ghost"
-                      onClick={() => navigate(`/admin/monitors/${monitor.id}`)}
-                    >
+                    <button className="button ghost" onClick={() => navigate(`/admin/monitors/${monitor.id}`)}>
                       Edit
                     </button>
                     <button className="button secondary" onClick={() => duplicateMonitor(monitor)}>

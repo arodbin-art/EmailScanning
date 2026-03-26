@@ -52,7 +52,7 @@ export function parseOrthodonticsPaymentEmail(
   const transactionId = extractReference(normalizedBody) ?? undefined
   return {
     eventType: ORTHODONTICS_EVENT_TYPES.PAYMENT_APPROVED,
-    merchant: "Durham Orthodontics",
+    merchant: "Durham Orthodontics Ajax",
     amount: extractAmount(normalizedBody),
     currency: "CAD",
     transactionId,

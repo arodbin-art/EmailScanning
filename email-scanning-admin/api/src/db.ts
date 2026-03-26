@@ -19,6 +19,7 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
     'name',
     'enabled',
     'provider',
+    'capture_key',
     'sender_rules',
     'from_contains',
     'subject_contains',
@@ -33,6 +34,62 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
     'allowed_event_types',
     'created_at',
     'updated_at'
+  ],
+  filter_draft_sessions: [
+    'id',
+    'name',
+    'provider',
+    'scope',
+    'mail_account_ids',
+    'status',
+    'analysis_provider',
+    'analysis_model',
+    'latest_confidence',
+    'latest_summary_json',
+    'monitor_id',
+    'created_at',
+    'updated_at'
+  ],
+  filter_draft_samples: [
+    'id',
+    'session_id',
+    'sample_index',
+    'source_kind',
+    'raw_source',
+    'filename',
+    'from_address',
+    'subject',
+    'body_text',
+    'body_html',
+    'normalized_body',
+    'parsed_email_json',
+    'created_at',
+    'updated_at'
+  ],
+  filter_draft_questions: [
+    'id',
+    'session_id',
+    'question_key',
+    'question_json',
+    'created_at',
+    'answered_at'
+  ],
+  filter_draft_answers: [
+    'id',
+    'session_id',
+    'question_id',
+    'answer_json',
+    'created_at',
+    'updated_at'
+  ],
+  filter_draft_proposals: [
+    'id',
+    'session_id',
+    'proposal_json',
+    'analysis_json',
+    'confidence',
+    'created_monitor_id',
+    'created_at'
   ]
 };
 
@@ -41,7 +98,15 @@ export async function validateSchemaOrThrow(): Promise<void> {
     SELECT table_name, column_name
     FROM information_schema.columns
     WHERE table_schema = 'email_scanning'
-      AND table_name IN ('mail_accounts', 'monitors')
+      AND table_name IN (
+        'mail_accounts',
+        'monitors',
+        'filter_draft_sessions',
+        'filter_draft_samples',
+        'filter_draft_questions',
+        'filter_draft_answers',
+        'filter_draft_proposals'
+      )
   `) as { table_name: string; column_name: string }[];
 
   const byTable = rows.reduce<Record<string, Set<string>>>((acc, row) => {

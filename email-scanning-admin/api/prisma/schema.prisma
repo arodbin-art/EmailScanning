@@ -19,6 +19,16 @@ enum MonitorScope {
   @@map("monitor_scope")
 }
 
+enum FilterDraftSessionStatus {
+  draft
+  questions_pending
+  ready
+  monitor_created
+  cancelled
+
+  @@map("filter_draft_session_status")
+}
+
 model MailAccount {
   id                      Int      @id @default(autoincrement())
   provider                String   @db.VarChar(50)
@@ -38,6 +48,7 @@ model Monitor {
   name                String        @db.VarChar(200)
   enabled             Boolean       @default(true)
   provider            String        @db.VarChar(50)
+  captureKey          String?       @map("capture_key") @db.VarChar(120)
   senderRules         Json?         @map("sender_rules")
   fromContains        String?       @map("from_contains") @db.Text
   subjectContains     String?       @map("subject_contains") @db.Text
@@ -54,4 +65,78 @@ model Monitor {
   updatedAt           DateTime      @map("updated_at") @db.Timestamp(6)
 
   @@map("monitors")
+}
+
+model FilterDraftSession {
+  id                String                   @id @db.Text
+  name              String                   @db.VarChar(200)
+  provider          String                   @db.VarChar(50)
+  scope             MonitorScope             @default(all)
+  mailAccountIds    Json?                    @map("mail_account_ids")
+  status            FilterDraftSessionStatus
+  analysisProvider  String                   @map("analysis_provider") @db.VarChar(50)
+  analysisModel     String?                  @map("analysis_model") @db.VarChar(120)
+  latestConfidence  Decimal?                 @map("latest_confidence") @db.Decimal(4, 3)
+  latestSummaryJson Json?                    @map("latest_summary_json")
+  monitorId         String?                  @map("monitor_id") @db.Text
+  createdAt         DateTime                 @map("created_at") @db.Timestamp(6)
+  updatedAt         DateTime                 @map("updated_at") @db.Timestamp(6)
+
+  @@map("filter_draft_sessions")
+}
+
+model FilterDraftSample {
+  id              String   @id @db.Text
+  sessionId       String   @map("session_id") @db.Text
+  sampleIndex     Int      @map("sample_index")
+  sourceKind      String   @map("source_kind") @db.VarChar(30)
+  rawSource       String   @map("raw_source") @db.Text
+  filename        String?  @db.Text
+  fromAddress     String?  @map("from_address") @db.Text
+  subject         String?  @db.Text
+  bodyText        String?  @map("body_text") @db.Text
+  bodyHtml        String?  @map("body_html") @db.Text
+  normalizedBody  String   @map("normalized_body") @db.Text
+  parsedEmailJson Json?    @map("parsed_email_json")
+  createdAt       DateTime @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime @map("updated_at") @db.Timestamp(6)
+
+  @@unique([sessionId, sampleIndex])
+  @@map("filter_draft_samples")
+}
+
+model FilterDraftQuestion {
+  id           String   @id @db.Text
+  sessionId    String   @map("session_id") @db.Text
+  questionKey  String   @map("question_key") @db.Text
+  questionJson Json     @map("question_json")
+  createdAt    DateTime @map("created_at") @db.Timestamp(6)
+  answeredAt   DateTime? @map("answered_at") @db.Timestamp(6)
+
+  @@unique([sessionId, questionKey])
+  @@map("filter_draft_questions")
+}
+
+model FilterDraftAnswer {
+  id         String   @id @db.Text
+  sessionId  String   @map("session_id") @db.Text
+  questionId String   @map("question_id") @db.Text
+  answerJson Json     @map("answer_json")
+  createdAt  DateTime @map("created_at") @db.Timestamp(6)
+  updatedAt  DateTime @map("updated_at") @db.Timestamp(6)
+
+  @@unique([sessionId, questionId])
+  @@map("filter_draft_answers")
+}
+
+model FilterDraftProposal {
+  id               String   @id @db.Text
+  sessionId        String   @map("session_id") @db.Text
+  proposalJson     Json     @map("proposal_json")
+  analysisJson     Json     @map("analysis_json")
+  confidence       Decimal? @db.Decimal(4, 3)
+  createdMonitorId String?  @map("created_monitor_id") @db.Text
+  createdAt        DateTime @map("created_at") @db.Timestamp(6)
+
+  @@map("filter_draft_proposals")
 }

@@ -11,6 +11,7 @@ const baseDraft: MonitorEditorDraft = {
   name: '',
   enabled: true,
   provider: '',
+  capture_key: '',
   scope: 'all',
   mail_account_ids: [],
   sender_rules: [],
@@ -50,6 +51,7 @@ function testAmazonTemplatePrefill(): void {
   const draft = applyTemplateToDraft(baseDraft, template);
   assert(draft.name === 'Amazon (returns lifecycle)', 'name should be prefilled');
   assert(draft.provider === 'gmail', 'provider should be prefilled');
+  assert(draft.capture_key === '', 'capture key defaults empty when omitted');
   assert(draft.enabled === false, 'enabled should follow template default');
   assert(draft.allowed_event_types.includes('amazon.refund_issued'), 'amazon event types should be mapped');
 }
@@ -63,12 +65,14 @@ function testUnknownFamilyLeavesEventsBlank(): void {
     version: '1.0.0',
     monitor_defaults: {
       provider: 'gmail',
+      capture_key: 'orthodontics_email',
       event_family_prefixes: ['orthodontics.']
     }
   };
 
   const draft = applyTemplateToDraft(baseDraft, template);
   assert(draft.allowed_event_types.length === 0, 'missing allowed_event_types should default to empty');
+  assert(draft.capture_key === 'orthodontics_email', 'capture key should map from template');
 }
 
 function main(): void {

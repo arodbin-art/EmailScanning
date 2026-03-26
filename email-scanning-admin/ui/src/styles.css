@@ -342,6 +342,18 @@ a {
   font-size: 12px;
 }
 
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.split-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
 .tabs {
   display: flex;
   gap: 8px;

@@ -6,6 +6,10 @@ import { requireAdmin } from './auth.js';
 import {
   mailAccountInputSchema,
   monitorInputSchema,
+  filterDraftSessionInputSchema,
+  filterDraftSamplesPayloadSchema,
+  filterDraftAnswersPayloadSchema,
+  filterDraftCreateMonitorSchema,
   validateRegexOrThrow,
   buildAiWarnings
 } from './validation.js';
@@ -23,6 +27,20 @@ import {
 } from './store.js';
 import { EventsOutboxStatus } from './types.js';
 import { getTemplateById, listTemplateSummaries } from './templates.js';
+import {
+  buildFilterDraftProposal,
+  filterDraftProposalSchema,
+  normalizeFilterDraftSample
+} from './filterDraftAnalysis.js';
+import { analyzeFilterDraft } from './filterDraftAi.js';
+import {
+  createFilterDraftSession,
+  getFilterDraftSession,
+  markFilterDraftMonitorCreated,
+  replaceFilterDraftSamples,
+  saveFilterDraftAnalysis,
+  upsertFilterDraftAnswers
+} from './filterDraftStore.js';
 
 export function createApp() {
   const app = express();
@@ -195,6 +213,7 @@ export function createApp() {
         name: parsed.name,
         enabled: parsed.enabled ?? true,
         provider: parsed.provider,
+        capture_key: parsed.capture_key ?? null,
         scope: parsed.scope,
         mail_account_ids: parsed.mail_account_ids ?? null,
         sender_rules: parsed.sender_rules ?? null,
@@ -242,6 +261,7 @@ export function createApp() {
         name: parsed.name,
         enabled: parsed.enabled ?? true,
         provider: parsed.provider,
+        capture_key: parsed.capture_key ?? null,
         scope: parsed.scope,
         mail_account_ids: parsed.mail_account_ids ?? null,
         sender_rules: parsed.sender_rules ?? null,
@@ -261,6 +281,250 @@ export function createApp() {
       }
       const warnings = buildAiWarnings(data.ai_prompt_template, aiEnabled);
       res.json({ data, warnings });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/filter-drafts', async (req, res, next) => {
+    try {
+      const parsed = filterDraftSessionInputSchema.parse(req.body);
+      if (parsed.scope === 'selected' && parsed.mail_account_ids.length === 0) {
+        res.status(400).json({ error: 'scope=selected requires mail_account_ids' });
+        return;
+      }
+      if (parsed.mail_account_ids.length > 0) {
+        const providers = await getMailAccountProviders(parsed.mail_account_ids);
+        const mismatch = providers.some((provider) => provider !== parsed.provider);
+        if (mismatch || providers.length !== parsed.mail_account_ids.length) {
+          res.status(400).json({ error: 'provider must match linked mail accounts' });
+          return;
+        }
+      }
+
+      const data = await createFilterDraftSession(parsed);
+      res.status(201).json({ data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/filter-drafts/:id/samples', async (req, res, next) => {
+    try {
+      const session = await getFilterDraftSession(req.params.id);
+      if (!session) {
+        res.status(404).json({ error: 'Filter draft session not found' });
+        return;
+      }
+      const parsed = filterDraftSamplesPayloadSchema.parse(req.body);
+      const data = await replaceFilterDraftSamples(
+        session.id,
+        parsed.samples.map((sample) => normalizeFilterDraftSample(sample))
+      );
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/filter-drafts/:id/analyze', async (req, res, next) => {
+    try {
+      const session = await getFilterDraftSession(req.params.id);
+      if (!session) {
+        res.status(404).json({ error: 'Filter draft session not found' });
+        return;
+      }
+      if (session.samples.length === 0) {
+        res.status(400).json({ error: 'Add at least one sample before analysis.' });
+        return;
+      }
+
+      const answers = toFilterDraftAnswerMap(session);
+      const analysisResult = await analyzeFilterDraft({
+        session: {
+          name: session.name,
+          provider: session.provider,
+          scope: session.scope,
+          mail_account_ids: session.mail_account_ids ?? []
+        },
+        samples: session.samples.map((sample) => ({
+          sample_index: sample.sample_index,
+          source_kind: sample.source_kind as 'structured' | 'raw_email' | 'eml',
+          raw_source: sample.raw_source,
+          filename: sample.filename,
+          from_address: sample.from_address ?? '',
+          subject: sample.subject ?? '',
+          body_text: sample.body_text ?? '',
+          body_html: sample.body_html,
+          normalized_body: sample.normalized_body,
+          parsed_email_json: (sample.parsed_email_json as Record<string, unknown> | null) ?? {}
+        })),
+        answers
+      });
+      const proposal = buildFilterDraftProposal({
+        session: {
+          name: session.name,
+          provider: session.provider,
+          scope: session.scope,
+          mail_account_ids: session.mail_account_ids ?? []
+        },
+        analysis: analysisResult.analysis,
+        answers
+      });
+
+      await saveFilterDraftAnalysis({
+        sessionId: session.id,
+        status: analysisResult.analysis.questions.length > 0 ? 'questions_pending' : 'ready',
+        provider: analysisResult.provider,
+        model: analysisResult.model,
+        analysis: analysisResult.analysis,
+        proposal
+      });
+
+      const data = await getFilterDraftSession(session.id);
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/filter-drafts/:id/answers', async (req, res, next) => {
+    try {
+      const session = await getFilterDraftSession(req.params.id);
+      if (!session) {
+        res.status(404).json({ error: 'Filter draft session not found' });
+        return;
+      }
+      const parsed = filterDraftAnswersPayloadSchema.parse(req.body);
+      await upsertFilterDraftAnswers(session.id, parsed.answers);
+
+      const refreshed = await getFilterDraftSession(session.id);
+      if (!refreshed || refreshed.samples.length === 0) {
+        res.status(400).json({ error: 'Add at least one sample before analysis.' });
+        return;
+      }
+
+      const answers = toFilterDraftAnswerMap(refreshed);
+      const analysisResult = await analyzeFilterDraft({
+        session: {
+          name: refreshed.name,
+          provider: refreshed.provider,
+          scope: refreshed.scope,
+          mail_account_ids: refreshed.mail_account_ids ?? []
+        },
+        samples: refreshed.samples.map((sample) => ({
+          sample_index: sample.sample_index,
+          source_kind: sample.source_kind as 'structured' | 'raw_email' | 'eml',
+          raw_source: sample.raw_source,
+          filename: sample.filename,
+          from_address: sample.from_address ?? '',
+          subject: sample.subject ?? '',
+          body_text: sample.body_text ?? '',
+          body_html: sample.body_html,
+          normalized_body: sample.normalized_body,
+          parsed_email_json: (sample.parsed_email_json as Record<string, unknown> | null) ?? {}
+        })),
+        answers
+      });
+      const proposal = buildFilterDraftProposal({
+        session: {
+          name: refreshed.name,
+          provider: refreshed.provider,
+          scope: refreshed.scope,
+          mail_account_ids: refreshed.mail_account_ids ?? []
+        },
+        analysis: analysisResult.analysis,
+        answers
+      });
+
+      await saveFilterDraftAnalysis({
+        sessionId: refreshed.id,
+        status: analysisResult.analysis.questions.length > 0 ? 'questions_pending' : 'ready',
+        provider: analysisResult.provider,
+        model: analysisResult.model,
+        analysis: analysisResult.analysis,
+        proposal
+      });
+
+      const data = await getFilterDraftSession(refreshed.id);
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get('/api/filter-drafts/:id', async (req, res, next) => {
+    try {
+      const data = await getFilterDraftSession(req.params.id);
+      if (!data) {
+        res.status(404).json({ error: 'Filter draft session not found' });
+        return;
+      }
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/filter-drafts/:id/create-monitor', async (req, res, next) => {
+    try {
+      const session = await getFilterDraftSession(req.params.id);
+      if (!session) {
+        res.status(404).json({ error: 'Filter draft session not found' });
+        return;
+      }
+      if (!session.latest_proposal && !req.body?.proposal) {
+        res.status(400).json({ error: 'Analyze the draft before creating a monitor.' });
+        return;
+      }
+
+      const parsed = filterDraftCreateMonitorSchema.parse(req.body ?? {});
+      const proposal = parsed.proposal ?? session.latest_proposal?.proposal_json;
+      if (!proposal || typeof proposal !== 'object') {
+        res.status(400).json({ error: 'A valid proposal is required to create a monitor.' });
+        return;
+      }
+
+      const proposalData = filterDraftProposalSchema.parse(proposal);
+      validateRegexOrThrow(proposalData.subject_regex, 'Subject');
+      validateRegexOrThrow(proposalData.body_regex, 'Body');
+      if (proposalData.scope === 'selected' && (!proposalData.mail_account_ids || proposalData.mail_account_ids.length === 0)) {
+        res.status(400).json({ error: 'scope=selected requires mail_account_ids' });
+        return;
+      }
+      const mailAccountIds = proposalData.mail_account_ids ?? [];
+      if (mailAccountIds.length > 0) {
+        const providers = await getMailAccountProviders(mailAccountIds);
+        const mismatch = providers.some((provider) => provider !== proposalData.provider);
+        if (mismatch || providers.length !== mailAccountIds.length) {
+          res.status(400).json({ error: 'provider must match linked mail accounts' });
+          return;
+        }
+      }
+
+      const id = `mon_${randomUUID()}`;
+      const data = await createMonitor({
+        id,
+        name: proposalData.name,
+        enabled: parsed.enabled ?? false,
+        provider: proposalData.provider,
+        capture_key: proposalData.capture_key ?? null,
+        scope: proposalData.scope,
+        mail_account_ids: proposalData.mail_account_ids ?? null,
+        sender_rules: proposalData.sender_rules ?? null,
+        from_contains: proposalData.from_contains ?? null,
+        subject_contains: proposalData.subject_contains ?? null,
+        subject_regex: proposalData.subject_regex ?? null,
+        body_regex: proposalData.body_regex ?? null,
+        has_attachments: proposalData.has_attachments ?? null,
+        gmail_label: proposalData.gmail_label ?? null,
+        ai_prompt_template: proposalData.ai_prompt_template ?? null,
+        confidence_threshold: proposalData.confidence_threshold ?? null,
+        allowed_event_types: proposalData.allowed_event_types ?? null
+      });
+
+      await markFilterDraftMonitorCreated({ sessionId: session.id, monitorId: data.id });
+      res.status(201).json({ data });
     } catch (err) {
       next(err);
     }
@@ -333,4 +597,15 @@ export function createApp() {
   });
 
   return app;
+}
+
+function toFilterDraftAnswerMap(session: Awaited<ReturnType<typeof getFilterDraftSession>>): Record<string, unknown> {
+  if (!session) return {};
+  return session.questions.reduce<Record<string, unknown>>((acc, question) => {
+    const answer = (question.answer_json as { value?: unknown } | null)?.value;
+    if (answer !== undefined) {
+      acc[question.question_key] = answer;
+    }
+    return acc;
+  }, {});
 }

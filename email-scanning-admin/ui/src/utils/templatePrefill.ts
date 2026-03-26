@@ -4,6 +4,7 @@ export type MonitorEditorDraft = {
   name: string;
   enabled: boolean;
   provider: string;
+  capture_key: string;
   scope: 'all' | 'selected';
   mail_account_ids: number[];
   sender_rules: string[];
@@ -28,6 +29,7 @@ export function applyTemplateToDraft(
     name: template.name,
     enabled: defaults.enabled ?? false,
     provider: defaults.provider,
+    capture_key: defaults.capture_key ?? '',
     sender_rules: defaults.sender_rules ?? [],
     from_contains: defaults.from_contains ?? '',
     subject_contains: defaults.subject_contains ?? '',

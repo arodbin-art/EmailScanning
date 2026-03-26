@@ -145,6 +145,7 @@ export async function listMonitors(): Promise<MonitorRecord[]> {
       name,
       enabled,
       provider,
+      capture_key,
       scope,
       mail_account_ids,
       sender_rules,
@@ -176,6 +177,7 @@ export async function createMonitor(input: {
   name: string;
   enabled: boolean;
   provider: string;
+  capture_key: string | null;
   scope: 'all' | 'selected';
   mail_account_ids: number[] | null;
   sender_rules: unknown | null;
@@ -200,6 +202,7 @@ export async function createMonitor(input: {
       name,
       enabled,
       provider,
+      capture_key,
       sender_rules,
       from_contains,
       subject_contains,
@@ -219,6 +222,7 @@ export async function createMonitor(input: {
       ${input.name},
       ${input.enabled},
       ${input.provider},
+      ${input.capture_key},
       ${senderRulesJson}::jsonb,
       ${input.from_contains},
       ${input.subject_contains},
@@ -239,6 +243,7 @@ export async function createMonitor(input: {
       name,
       enabled,
       provider,
+      capture_key,
       scope,
       mail_account_ids,
       sender_rules,
@@ -271,6 +276,7 @@ export async function updateMonitor(
     name: string;
     enabled: boolean;
     provider: string;
+    capture_key: string | null;
     scope: 'all' | 'selected';
     mail_account_ids: number[] | null;
     sender_rules: unknown | null;
@@ -296,6 +302,7 @@ export async function updateMonitor(
       name = ${input.name},
       enabled = ${input.enabled},
       provider = ${input.provider},
+      capture_key = ${input.capture_key},
       sender_rules = ${senderRulesJson}::jsonb,
       from_contains = ${input.from_contains},
       subject_contains = ${input.subject_contains},
@@ -315,6 +322,7 @@ export async function updateMonitor(
       name,
       enabled,
       provider,
+      capture_key,
       scope,
       mail_account_ids,
       sender_rules,

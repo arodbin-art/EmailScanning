@@ -27,7 +27,7 @@ function testApprovedPaymentParses(): void {
 
   assert(parsed !== null, "durham approved payment should parse")
   assert(parsed?.eventType === "orthodontics.payment_approved", "event type")
-  assert(parsed?.merchant === "Durham Orthodontics", "merchant parsed")
+  assert(parsed?.merchant === "Durham Orthodontics Ajax", "merchant parsed")
   assert(parsed?.amount === 235.5, "amount parsed")
   assert(parsed?.transactionId === "ELV-778899", "transaction id parsed")
   assert(parsed?.paymentReference === "ELV-778899", "legacy payment reference parsed")

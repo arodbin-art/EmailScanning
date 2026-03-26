@@ -1,13 +1,19 @@
 # EmailScanning Handoff
 
-Last updated: 2026-02-27T05:23:30Z
+Last updated: 2026-03-26T04:31:00Z
 
 ## Current state
 - Signal engine service is running on NAS in /media/nas/workspaces/EmailScanning.
 - Gmail ingestion works, GMAIL_QUERY is set to in:anywhere to include spam.
 - Admin web UI is running and can edit mail accounts and monitors.
+- Admin web UI now includes a `Filter Drafts` flow for AI-assisted monitor onboarding from 1-2 sample emails.
 - Admin web UI now includes an Events page to review all outbox events, including rejected delivery responses.
 - Admin Mail Accounts UI now supports `moneyrecovery_person_code` mapping per mailbox.
+- Monitors now support optional `capture_key` for compact capture-origin labels such as `(via durham_orthodontics_approved_payment)`.
+- Next targeted automation work is not implemented yet:
+  - Mobility Room Jane receipt emails should create Rodney physio RVIs with phase 1 `WSIB ML` prefilled as 90% paid and phase 2 `OCT ML` started for the remaining 10%.
+  - current filter-draft analyzer can misclassify those receipts as `manulife` because the email body contains `Manulife Financial (TELUS eClaims)`.
+  - desired implementation should use the receipt sender/subject and attachment, not the insurer mention in the receipt body, as the primary signal.
 - Amazon return and refund parsing exists and emits amazon events to events_outbox.
 - Amazon parser now supports all three lifecycle templates with order-level events:
   - `amazon.return_requested`
@@ -94,6 +100,15 @@ Last updated: 2026-02-27T05:23:30Z
   - `/admin/templates` lists registry templates and details.
   - `/admin/monitors` uses `Create from template` instead of hardcoded add buttons.
   - Includes `amazon-default`, `manulife-claims`, and `durham-orthodontics-approved-payment`.
+- Template runtime fix applied (2026-02-28):
+  - Root cause: admin runtime image missing `api/templates/templates.json` caused ENOENT on templates/monitors API calls.
+  - Fix:
+    - `email-scanning-admin/Dockerfile` now copies `/app/api/templates` into runner image.
+    - `api/src/templates.ts` path resolution now includes `process.cwd()/api/templates/templates.json`.
+  - Deployed image:
+    - `emailscanacr354705.azurecr.io/email-scanning-admin:template-fix-20260228-0046`
+  - Live revision:
+    - `email-scanning-admin-dev--0000011` (latest ready).
 - Event family filters remain available on `/admin/events`.
 - Admin API auth now supports Entra ID JWTs:
   - `ADMIN_AUTH_MODE=token|entra|hybrid`
@@ -148,13 +163,19 @@ Last updated: 2026-02-27T05:23:30Z
 - In Entra mode, static ADMIN_TOKEN is not used.
 - UI reads runtime bearer token from localStorage key `email_scanning_admin_token`.
 - Events page URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/events
+- Filter Drafts page URL: https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/filter-drafts/new
+- Current live admin revision: `email-scanning-admin-dev--0000014`
+- Current live admin image: `emailscanacr354705.azurecr.io/email-scanning-admin:filter-drafts-hotfix-20260326-042614`
+- Runtime note:
+  - filter-draft analysis is deployed and usable now
+  - Azure OpenAI filter-draft env/secrets are not configured on the admin container app yet, so analysis currently falls back to the built-in deterministic heuristic path in Azure dev
 
 ## Azure dev deployment
 - Resource group: rg-email-scanning-dev
 - Container Apps environment: email-scan-dev-env
 - ACR: emailscanacr354705
 - Job: signal-engine-dev (manual trigger)
-- Image: emailscanacr354705.azurecr.io/signal-engine:dev
+- Image: emailscanacr354705.azurecr.io/signal-engine:filter-drafts-20260320-211137
 - Last manual run: 2026-02-06T05:29:13Z (poll summary logged, 16 new emails)
 - Last automation run: 2026-02-06T13:56:38Z (poll summary logged, 25 new emails)
 
@@ -241,6 +262,75 @@ Last updated: 2026-02-27T05:23:30Z
   - no bearer token => `401 Unauthorized`
   - invalid bearer token => `401 Unauthorized`
 - Entra token validation now accepts both tenant issuer formats (`sts.windows.net/<tenant>/` and `login.microsoftonline.com/<tenant>/v2.0`) and audience forms (`api://<app-id>` and raw `<app-id>`), matching MoneyRecovery behavior.
+
+## 2026-03-20 filter draft onboarding
+- Migration added:
+  - `prisma/migrations/20260320110000_filter_drafts_and_monitor_capture_key`
+- New persisted records:
+  - `filter_draft_sessions`
+  - `filter_draft_samples`
+  - `filter_draft_questions`
+  - `filter_draft_answers`
+  - `filter_draft_proposals`
+- New admin API endpoints:
+  - `POST /api/filter-drafts`
+  - `POST /api/filter-drafts/:id/samples`
+  - `POST /api/filter-drafts/:id/analyze`
+  - `POST /api/filter-drafts/:id/answers`
+  - `GET /api/filter-drafts/:id`
+  - `POST /api/filter-drafts/:id/create-monitor`
+- Admin UI entry points:
+  - `/admin/filter-drafts/new`
+  - `/admin/filter-drafts/:id`
+- Behavior:
+  - accepts 1 required sample and 1 optional comparison sample
+  - supports structured `from` / `subject` / `body_text` input and raw pasted email text
+  - stores raw sample evidence and generated proposal JSON for audit/debug
+  - asks at most 3 structured clarification questions when confidence is low or required mapping is ambiguous
+  - `create-monitor` always creates the monitor disabled by default for review
+- AI provider/runtime:
+  - Azure OpenAI is optional and pluggable
+  - envs:
+    - `FILTER_DRAFT_AI_ENABLED`
+    - `AZURE_OPENAI_ENDPOINT`
+    - `AZURE_OPENAI_FILTER_DRAFT_DEPLOYMENT`
+    - `AZURE_OPENAI_API_KEY`
+    - optional `AZURE_OPENAI_API_VERSION`
+    - optional `AZURE_OPENAI_FILTER_DRAFT_MODEL`
+  - if Azure OpenAI is disabled, missing, times out, or returns invalid JSON, the API falls back to deterministic heuristic analysis instead of failing the draft session
+- Azure dev rollout status:
+  - migration applied to shared dev database on 2026-03-20
+  - admin app initially deployed to revision `email-scanning-admin-dev--0000012`
+  - current hosted testing entry point:
+    - `https://email-scanning-admin-dev.icyrock-837789e5.canadacentral.azurecontainerapps.io/admin/filter-drafts/new`
+
+## 2026-03-26 filter draft hotfix
+- Symptom:
+  - hosted `Save as draft and analyze samples` returned `Internal server error`
+- Root cause:
+  - draft session creation inserted plain text into enum column `email_scanning.filter_draft_sessions.scope`
+  - Postgres rejected the insert with `42804 column "scope" is of type monitor_scope but expression is of type text`
+- Fix:
+  - `email-scanning-admin/api/src/filterDraftStore.ts` now casts inserted scope values to `email_scanning.monitor_scope`
+- Azure dev rollout:
+  - hotfix image: `emailscanacr354705.azurecr.io/email-scanning-admin:filter-drafts-hotfix-20260326-042614`
+  - live revision: `email-scanning-admin-dev--0000014`
+  - direct dev-DB runtime validation of `createFilterDraftSession(... scope: "all" ...)` succeeded after deploy
+
+## 2026-03-20 description/title cleanup
+- Added shared formatter in `src/delivery/descriptionFormatter.ts` for human title normalization, compact capture labels, and stripping generated memo fragments.
+- Orthodontics delivery now keeps:
+  - human-facing title: business/provider title only
+  - capture origin: compact suffix `(via <filter_key>)`
+  - structured metadata: transaction ID and plan details
+- Visible descriptions for new orthodontics deliveries no longer include:
+  - `transaction_id=...`
+  - plan/coverage text
+  - verbose `Invoice from email` prefixes
+- Default orthodontics capture key is `durham_orthodontics_approved_payment` when older payloads do not provide one, so replayed events still render the compact label consistently.
+- Azure dev rollout status:
+  - ingestion job image: `emailscanacr354705.azurecr.io/signal-engine:filter-drafts-20260320-211137`
+  - delivery job image: `emailscanacr354705.azurecr.io/signal-engine:filter-drafts-20260320-211137`
 
 ## Next steps
 - Keep mail account person mapping set to a valid code (`ROD|PRI|CHA|YAS|ADR`) in Admin Hub (`/admin/mail-accounts`).

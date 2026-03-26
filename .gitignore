@@ -9,3 +9,6 @@ tmp
 .admin_token
 *.pid
 *.log
+.azure/
+logs/
+email-scanning-admin/ui/dist-test/

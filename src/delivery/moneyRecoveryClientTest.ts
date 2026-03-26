@@ -420,6 +420,12 @@ async function testOrthodonticsPaymentCreatesInsuranceRviAndUploadsArtifact(): P
 
   assert(result.status === "accepted", `expected accepted, got ${result.status}`)
   assert(calls.some((c) => c.url.endsWith("/rvi") && c.method === "POST"), "expected insurance RVI create")
+  const createCall = calls.find((c) => c.url.endsWith("/rvi") && c.method === "POST")
+  assert(
+    createCall?.body?.merchant === "Durham Orthodontics Ajax (CHA) (via durham_orthodontics_approved_payment)",
+    "new orthodontics RVI should use compact display description"
+  )
+  assert(createCall?.body?.memo === undefined, "new orthodontics RVI should not include noisy memo text")
   assert(
     calls.some((c) => c.url.includes("/rvi/9901/external-references") && c.method === "PATCH"),
     "expected external reference upsert"
@@ -452,7 +458,8 @@ async function testOrthodonticsReplayDoesNotDuplicateCreate(): Promise<void> {
       if (method === "GET") {
         return mkRes(200, {
           id: 5501,
-          memo: "Orthodontics: invoice received via email. Plan: WSIB(ML) 50%, then OCT(ML) 50% after COB.",
+          merchant: "Durham Orthodontics Ajax (CHA) (via durham_orthodontics_approved_payment)",
+          memo: null,
           flows: [
             {
               id: 310,
@@ -490,6 +497,75 @@ async function testOrthodonticsReplayDoesNotDuplicateCreate(): Promise<void> {
 
   assert(result.status === "accepted", `expected accepted, got ${result.status}`)
   assert(!calls.some((c) => c.url.endsWith("/rvi") && c.method === "POST"), "should not create duplicate RVI")
+  assert(
+    !calls.some((c) => c.url.endsWith("/rvi/5501") && c.method === "PATCH"),
+    "clean orthodontics presentation should be idempotent"
+  )
+}
+
+async function testOrthodonticsReplayCleansLegacyDescription(): Promise<void> {
+  const calls: Call[] = []
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = String(url)
+    const method = init?.method ?? "GET"
+    const body = init?.body ? JSON.parse(init.body) : undefined
+    calls.push({ url: u, method, body })
+    if (u.includes("/rvi/external-references/lookup")) return mkRes(200, { rvi_id: 5510 })
+    if (u.includes("/rvi/5510/external-references")) return mkRes(200, { ok: true })
+    if (u.endsWith("/rvi/5510/artifacts")) return mkRes(200, [])
+    if (u.endsWith("/rvi/5510")) {
+      if (method === "GET") {
+        return mkRes(200, {
+          id: 5510,
+          merchant: "Durham Orthodontics Ajax (CHA)",
+          memo: "Invoice from email | transaction_id=TX-ORTH-111 | Orthodontics: invoice received via email. Plan: WSIB(ML) 50%, then OTIP(ML) 50% after COB.",
+          flows: [
+            {
+              id: 311,
+              type: "claim",
+              sequence_order: 1,
+              amount_submitted: 0,
+              amount_paid: 0,
+            },
+          ],
+        })
+      }
+      return mkRes(200, { ok: true })
+    }
+    return mkRes(500, { error: "unexpected", url: u, method })
+  }) as any
+
+  const client = new MoneyRecoveryClient({ baseUrl: "https://example.test", bearerToken: "x", timeoutMs: 1000 })
+  const result = await client.deliverOutboxEvent({
+    eventId: 11,
+    eventType: "orthodontics.payment_approved",
+    sourceEmailId: 21,
+    mailAccountId: 10,
+    mailAccountPersonCode: "CHA",
+    payload: {
+      person_code_hint: "CHA",
+      provider_name: "Durham Orthodontics Ajax",
+      capture_key: "durham_orthodontics_approved_payment",
+      amount_total: 488.2,
+      transaction_id: "TX-ORTH-111",
+      attachments: [],
+      email: {
+        received_at: "2026-02-28T02:00:00.000Z",
+      },
+    },
+  })
+
+  assert(result.status === "accepted", `expected accepted, got ${result.status}`)
+  const patchCall = calls.find((c) => c.url.endsWith("/rvi/5510") && c.method === "PATCH")
+  assert(patchCall, "legacy orthodontics description should be cleaned")
+  assert(
+    patchCall?.body?.merchant === "Durham Orthodontics Ajax (CHA) (via durham_orthodontics_approved_payment)",
+    "merchant should be replaced with compact display description"
+  )
+  assert(
+    patchCall?.body?.memo === null,
+    "legacy generated memo fragments should be removed"
+  )
 }
 
 async function testOrthodonticsAppointmentSignalsMarkedNonFinancial(): Promise<void> {
@@ -525,6 +601,7 @@ async function main() {
   await testManulifeAiReviewMemoAppendIdempotent()
   await testOrthodonticsPaymentCreatesInsuranceRviAndUploadsArtifact()
   await testOrthodonticsReplayDoesNotDuplicateCreate()
+  await testOrthodonticsReplayCleansLegacyDescription()
   await testOrthodonticsAppointmentSignalsMarkedNonFinancial()
   console.log("moneyRecoveryClientTest ok")
 }

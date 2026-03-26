@@ -2,6 +2,11 @@ import { DeliveryClient, DeliveryResult, OutboxDeliveryInput } from "./types.js"
 import { MANULIFE_EVENT_TYPES, ORTHODONTICS_EVENT_TYPES } from "../events/signalEvents.js"
 import { createObjectStorage, resolveStorageProvider } from "../storage/index.js"
 import { ObjectStorage } from "../storage/objectStorage.js"
+import {
+  buildCaptureLabel,
+  buildDisplayDescription,
+  stripGeneratedMemoFragments,
+} from "./descriptionFormatter.js"
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 type TokenProvider = () => Promise<string | undefined>
@@ -49,6 +54,7 @@ type OrthodonticsAttachmentRef = {
 type OrthodonticsEventContext = {
   personCodeHint: string | null
   providerLabel: string
+  captureKey: string | null
   amountTotal: number | null
   transactionId: string | null
   statusText: string | null
@@ -219,6 +225,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
     }
 
     const warnings: string[] = []
+    const presentation = buildOrthodonticsPresentation(orthodontics.providerLabel, personCode, orthodontics.captureKey)
     if (orthodontics.attachments.length > 0) {
       const uploadWarnings = await this.tryUploadOrthodonticsArtifacts({
         rviId: resolved.rviId,
@@ -228,12 +235,13 @@ export class MoneyRecoveryClient implements DeliveryClient {
       warnings.push(...uploadWarnings)
     }
 
-    const memoApplied = await this.tryAppendOrthodonticsMemo({
+    const presentationApplied = await this.tryApplyOrthodonticsPresentation({
       rviId: resolved.rviId,
       sourceEventId: input.eventId,
+      displayDescription: presentation.displayDescription,
     })
-    if (!memoApplied.ok && memoApplied.warning) {
-      warnings.push(memoApplied.warning)
+    if (!presentationApplied.ok && presentationApplied.warning) {
+      warnings.push(presentationApplied.warning)
     }
 
     return {
@@ -246,6 +254,9 @@ export class MoneyRecoveryClient implements DeliveryClient {
         created: resolved.created,
         transaction_id: orthodontics.transactionId,
         provider_name: orthodontics.providerLabel,
+        human_title: presentation.humanTitle,
+        capture_label: presentation.captureLabel,
+        display_description: presentation.displayDescription,
         amount_total: orthodontics.amountTotal,
         attachments_count: orthodontics.attachments.length,
         delivery_warnings: warnings,
@@ -520,15 +531,10 @@ export class MoneyRecoveryClient implements DeliveryClient {
     const purchaseDate =
       dateOnlyFromIso(params.orthodontics.emailReceivedAt) ?? todayIsoDate()
     const deadlineDate = addDaysIso(purchaseDate, 365)
-    const memo = truncateMemo(
-      [
-        `${params.orthodontics.providerLabel} (${params.personCode}) - Invoice from email`,
-        params.orthodontics.transactionId
-          ? `transaction_id=${params.orthodontics.transactionId}`
-          : null,
-      ]
-        .filter((part): part is string => Boolean(part))
-        .join(" | ")
+    const presentation = buildOrthodonticsPresentation(
+      params.orthodontics.providerLabel,
+      params.personCode,
+      params.orthodontics.captureKey
     )
 
     const res = await this.requestJson("POST", "/rvi", {
@@ -537,7 +543,7 @@ export class MoneyRecoveryClient implements DeliveryClient {
       amount_total: amountTotal,
       purchase_date: purchaseDate,
       deadline_date: deadlineDate,
-      memo,
+      merchant: presentation.displayDescription,
       source_event_id: params.sourceEventId,
     })
     if (!res.ok) {
@@ -664,35 +670,45 @@ export class MoneyRecoveryClient implements DeliveryClient {
     return warnings
   }
 
-  private async tryAppendOrthodonticsMemo(params: {
+  private async tryApplyOrthodonticsPresentation(params: {
     rviId: number
     sourceEventId: number
+    displayDescription: string
   }): Promise<{ ok: boolean; warning?: string }> {
     const detail = await this.getRviDetail(params.rviId)
     if (detail.kind === "error") {
-      return { ok: false, warning: `memo update skipped: unable to load RVI ${params.rviId}` }
+      return { ok: false, warning: `presentation update skipped: unable to load RVI ${params.rviId}` }
     }
 
+    const existingMerchant = asString((detail.data as any)?.merchant)
     const existingMemo = asString((detail.data as any)?.memo)
-    const memoLine =
-      "Orthodontics: invoice received via email. Plan: WSIB(ML) 50%, then OCT(ML) 50% after COB."
-    if (existingMemo?.includes(memoLine)) {
-      return { ok: true }
-    }
+    const cleanedMemo = stripGeneratedMemoFragments(existingMemo, [
+      /^invoice from email$/i,
+      /^transaction_id=/i,
+      /^orthodontics: invoice received via email/i,
+    ])
 
-    const memo = appendMemoLine(existingMemo, memoLine)
-    if (!memo || memo === existingMemo) {
+    const body: Record<string, unknown> = { source_event_id: params.sourceEventId }
+    let hasChange = false
+    if (existingMerchant !== params.displayDescription) {
+      body.merchant = params.displayDescription
+      hasChange = true
+    }
+    if ((existingMemo ?? null) !== cleanedMemo) {
+      body.memo = cleanedMemo
+      hasChange = true
+    }
+    if (!hasChange) {
       return { ok: true }
     }
 
     const res = await this.requestJson("PATCH", `/rvi/${params.rviId}`, {
-      memo,
-      source_event_id: params.sourceEventId,
+      ...body,
     })
     if (!res.ok) {
       return {
         ok: false,
-        warning: `memo update failed for rvi ${params.rviId}: http ${res.httpStatus}`,
+        warning: `presentation update failed for rvi ${params.rviId}: http ${res.httpStatus}`,
       }
     }
     return { ok: true }
@@ -1378,6 +1394,10 @@ export class MoneyRecoveryClient implements DeliveryClient {
         asString(orthodontics.provider) ??
         asString(payload.merchant) ??
         "Durham Orthodontics",
+      captureKey:
+        asString(payload.capture_key) ??
+        asString(orthodontics.capture_key) ??
+        "durham_orthodontics_approved_payment",
       amountTotal: inferAmount([
         payload.amount_total,
         orthodontics.amount_total,
@@ -1578,6 +1598,29 @@ function appendMemoLine(existing: string | null, line: string): string {
     return existing
   }
   return `${existing}\n${nextLine.slice(0, available)}`
+}
+
+function buildOrthodonticsPresentation(
+  providerLabel: string,
+  personCode: string,
+  captureKey: string | null
+): { humanTitle: string; captureLabel: string | null; displayDescription: string } {
+  const normalizedProviderLabel = normalizeOrthodonticsProviderLabel(providerLabel)
+  const humanTitle = `${normalizedProviderLabel} (${personCode.trim().toUpperCase()})`
+  const captureLabel = buildCaptureLabel(captureKey)
+  return {
+    humanTitle,
+    captureLabel,
+    displayDescription: buildDisplayDescription(humanTitle, captureKey),
+  }
+}
+
+function normalizeOrthodonticsProviderLabel(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim()
+  if (/^durham orthodontics$/i.test(normalized)) {
+    return "Durham Orthodontics Ajax"
+  }
+  return normalized
 }
 
 function buildManulifeAiReviewPrefix(claimId: string | null): string {

@@ -26,6 +26,7 @@
     "test:amazon": "tsc -p tsconfig.json && node --no-warnings dist/automation/amazonReturnParserTest.js",
     "test:manulife": "tsc -p tsconfig.json && node --no-warnings dist/automation/manulifeClaimParserTest.js",
     "test:orthodontics": "tsc -p tsconfig.json && node --no-warnings dist/automation/orthodonticsPaymentParserTest.js && node --no-warnings dist/automation/orthodonticsAppointmentParserTest.js",
+    "test:delivery:descriptions": "tsc -p tsconfig.json && node --no-warnings dist/delivery/descriptionFormatterTest.js",
     "test:igpt": "tsc -p tsconfig.json && node --no-warnings dist/intelligence/igptProviderTest.js",
     "test:intelligence:shadow": "tsc -p tsconfig.json && node --no-warnings dist/intelligence/shadowRuntimeTest.js",
     "test:ingestion:entrypoint": "tsc -p tsconfig.json && node --no-warnings dist/ingestion/indexTest.js",

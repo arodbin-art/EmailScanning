@@ -14,6 +14,7 @@ export type MonitorRecord = {
   name: string;
   enabled: boolean;
   provider: string;
+  capture_key: string | null;
   scope: 'all' | 'selected';
   mail_account_ids: number[] | null;
   sender_rules: unknown | null;
@@ -50,4 +51,64 @@ export type EventRecord = {
   email_received_at: string | null;
   delivered_at: string | null;
   rvi_response: unknown | null;
+};
+
+export type FilterDraftSessionStatus =
+  | 'draft'
+  | 'questions_pending'
+  | 'ready'
+  | 'monitor_created'
+  | 'cancelled';
+
+export type FilterDraftQuestionRecord = {
+  id: string;
+  question_key: string;
+  question_json: unknown;
+  created_at: string;
+  answered_at: string | null;
+  answer_json: unknown | null;
+};
+
+export type FilterDraftProposalRecord = {
+  id: string;
+  proposal_json: unknown;
+  analysis_json: unknown;
+  confidence: number | null;
+  created_monitor_id: string | null;
+  created_at: string;
+};
+
+export type FilterDraftSampleRecord = {
+  id: string;
+  sample_index: number;
+  source_kind: string;
+  raw_source: string;
+  filename: string | null;
+  from_address: string | null;
+  subject: string | null;
+  body_text: string | null;
+  body_html: string | null;
+  normalized_body: string;
+  parsed_email_json: unknown | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FilterDraftSessionRecord = {
+  id: string;
+  name: string;
+  provider: string;
+  scope: 'all' | 'selected';
+  mail_account_ids: number[] | null;
+  status: FilterDraftSessionStatus;
+  analysis_provider: string;
+  analysis_model: string | null;
+  latest_confidence: number | null;
+  latest_summary_json: unknown | null;
+  monitor_id: string | null;
+  created_at: string;
+  updated_at: string;
+  samples: FilterDraftSampleRecord[];
+  questions: FilterDraftQuestionRecord[];
+  latest_proposal: FilterDraftProposalRecord | null;
 };

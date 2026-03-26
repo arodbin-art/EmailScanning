@@ -8,6 +8,7 @@ const defaultForm = {
   name: '',
   enabled: true,
   provider: '',
+  capture_key: '',
   scope: 'all' as const,
   mail_account_ids: [] as number[],
   sender_rules: [] as string[],
@@ -168,6 +169,7 @@ export default function MonitorEditorPage() {
               name: target.name,
               enabled: target.enabled,
               provider: target.provider,
+              capture_key: target.capture_key || '',
               scope: target.scope,
               mail_account_ids: target.mail_account_ids || [],
               sender_rules: Array.isArray(target.sender_rules)
@@ -219,6 +221,7 @@ export default function MonitorEditorPage() {
     name: state.name.trim(),
     enabled: state.enabled,
     provider: state.provider.trim(),
+    capture_key: state.capture_key.trim() || null,
     scope: state.scope,
     mail_account_ids: state.scope === 'selected' ? state.mail_account_ids : [],
     sender_rules: state.sender_rules,
@@ -373,6 +376,18 @@ export default function MonitorEditorPage() {
                   <option key={provider} value={provider} />
                 ))}
               </datalist>
+            </div>
+            <div className="form-field">
+              <label>Capture Key</label>
+              <input
+                className="input"
+                value={form.capture_key}
+                placeholder="e.g. mobilityroom_email"
+                onChange={(event) =>
+                  setForm({ ...form, capture_key: event.target.value.toLowerCase() })
+                }
+              />
+              <span className="helper">Optional compact identity used in labels like `(via mobilityroom_email)`.</span>
             </div>
             <div className="form-field">
               <label>Enabled</label>

@@ -1,14 +1,136 @@
 # signal-engine
 
-Last updated: 2026-02-27
+Last updated: 2026-03-26
 Status: IN PROGRESS
 
 ## NEXT
+- [ ] 0e. Add Mobility Room physio receipt automation for Rodney with prefilled WSIB ML -> OCT ML phases and receipt attachment handoff
+- [x] 0c. Add filter draft session schema + Admin Hub AI-assisted "new filter from sample emails" flow
+- [x] 0d. Add shared email-derived title/description formatter + clean orthodontics delivery descriptions
 - [x] 0. Template registry (file-based) implemented for Admin Hub monitor creation
+- [x] 0b. Fix template registry runtime file missing in admin container (`/app/templates/templates.json` ENOENT)
 - [ ] 1. Configure/verify `moneyrecovery_person_code` on all active Amazon/Manulife mail accounts
 - [ ] 2. Refresh Gmail OAuth token for account `id=1` (`invalid_grant`) and re-run live ingestion
 - [x] 3. Autonomous ingest+delivery scheduler + Manulife integration completed
 - [x] 4. Replace static/session tokens with proper service auth (`RVI` client credentials + official iGPT server credential)
+
+## 2026-03-20 - Filter draft onboarding + title cleanup
+Status: COMPLETE
+- Scope confirmed from task brief:
+  - add Admin Hub draft-session workflow for creating a monitor from 1-2 sample emails
+  - persist auditable sample-analysis sessions, structured questions/answers, and draft proposals
+  - add pluggable Azure OpenAI-backed analysis with strict JSON + heuristic fallback
+  - add reusable email-derived title/description formatter and remove orthodontics transaction/plan noise from visible descriptions
+- Constraints being followed:
+  - keep existing Amazon, Manulife, and orthodontics parsing/delivery behavior intact outside the targeted description cleanup
+  - keep changes additive and reversible
+  - update HANDOFF.md if delivered behavior/runbook changes
+- Implementation started:
+  - traced current admin monitor/template flow, deterministic orthodontics event emission, and MoneyRecovery title/memo construction
+  - identified current orthodontics noise source in `src/delivery/moneyRecoveryClient.ts` (`createOrthodonticsInsuranceRvi` + memo append path)
+  - identified admin entry points for new draft APIs/UI in `email-scanning-admin/api/src/app.ts`, `store.ts`, and `email-scanning-admin/ui/src/pages`
+- Delivered:
+  - added Prisma/admin schema for auditable filter draft sessions, samples, questions, answers, proposals, plus `monitors.capture_key`
+  - added migration `20260320110000_filter_drafts_and_monitor_capture_key`
+  - added admin API routes for draft create/get, sample upload, analyze, answer submission, and proposal-to-monitor creation
+  - added Azure OpenAI-backed strict-JSON analysis provider with heuristic fallback when AI is disabled, unavailable, or invalid
+  - added Admin Hub UI flow for `Filter Drafts` with 1-2 sample inputs, extracted structure summary, targeted follow-up questions, proposal review, and create-monitor handoff
+  - added shared delivery description formatter and switched orthodontics visible descriptions to compact human-facing titles with `(via <filter_key>)`
+- Validation:
+  - `npm run build` => PASS
+  - `cd email-scanning-admin/api && npm run build && npm test` => PASS
+  - `cd email-scanning-admin/ui && npm run build && npm run test:templates` => PASS
+  - `npm run test:orthodontics` => PASS
+  - `npm run test:delivery:descriptions` => PASS
+  - `npm run test:delivery:money-recovery` => PASS
+
+## 2026-03-20 - Azure rollout for filter drafts
+Status: COMPLETE
+- Goal:
+  - deploy the completed filter-draft onboarding and title/description cleanup changes to Azure dev so the hosted Admin Hub can be tested
+- Planned rollout:
+  - apply Prisma migration in the shared dev database
+  - build/push updated `email-scanning-admin` image to ACR
+  - update Azure Container App `email-scanning-admin-dev`
+  - verify hosted `/admin/filter-drafts/new` and API behavior after rollout
+- Completed rollout:
+  - applied Prisma migration `20260320110000_filter_drafts_and_monitor_capture_key` to Azure dev Postgres
+  - built/pushed `emailscanacr354705.azurecr.io/email-scanning-admin:filter-drafts-20260320-211137`
+  - built/pushed `emailscanacr354705.azurecr.io/signal-engine:filter-drafts-20260320-211137`
+  - updated Azure Container App `email-scanning-admin-dev` to revision `email-scanning-admin-dev--0000012`
+  - updated Azure jobs `signal-engine-dev` and `signal-engine-deliver-dev` to the new signal-engine image
+- Deployment validation:
+  - `npm run db:migrate:deploy` => PASS
+  - `az acr build ... email-scanning-admin:filter-drafts-20260320-211137` => PASS
+  - `az acr build ... signal-engine:filter-drafts-20260320-211137` => PASS
+  - `az containerapp update -n email-scanning-admin-dev ...` => PASS
+  - `az containerapp job update -n signal-engine-dev ...` => PASS
+  - `az containerapp job update -n signal-engine-deliver-dev ...` => PASS
+  - hosted admin revision `email-scanning-admin-dev--0000012` reports `Running` / `Healthy`
+
+## 2026-03-26 - Azure filter-draft save/analyze hotfix
+Status: COMPLETE
+- Symptom:
+  - hosted Azure admin flow returned `Internal server error` on `Save as draft and analyze samples`
+- Root cause identified from Azure Container App logs:
+  - `createFilterDraftSession` inserted plain text into `filter_draft_sessions.scope`
+  - Postgres rejected it because `scope` is enum type `email_scanning.monitor_scope`
+  - error: `42804 column "scope" is of type monitor_scope but expression is of type text`
+- Planned fix:
+  - cast inserted scope value to `email_scanning.monitor_scope`
+  - rebuild/redeploy admin app and recheck the flow
+- Delivered:
+  - patched `email-scanning-admin/api/src/filterDraftStore.ts` so draft session insert casts scope to `email_scanning.monitor_scope`
+  - rebuilt/pushed hotfix image `emailscanacr354705.azurecr.io/email-scanning-admin:filter-drafts-hotfix-20260326-042614`
+  - updated Azure Container App `email-scanning-admin-dev` to revision `email-scanning-admin-dev--0000014`
+- Validation:
+  - `cd email-scanning-admin/api && npm run build && npm test` => PASS
+  - direct runtime validation against shared dev DB:
+    - `createFilterDraftSession({ scope: "all" ... })` => PASS
+    - inserted session reloaded with `scope = "all"` and `status = "draft"`
+  - Azure revision `email-scanning-admin-dev--0000014` reports `Running` / `Healthy`
+
+## 2026-03-26 - Baseline tagged before Mobility Room automation
+Status: COMPLETE
+- Baseline captured before starting the next reimbursement automation change:
+  - current filter-draft onboarding feature is implemented and deployed
+  - current Azure hotfix for enum-cast draft session creation is deployed and validated
+  - docs refreshed to mark Mobility Room physio receipt automation as the next targeted work item
+- Upcoming implementation scope:
+  - detect `Mobility Room <notifications@janeapp.com>` / `Your Receipt - Mobility Room` receipt emails
+  - create a Rodney physio RVI automatically instead of misclassifying the email as a Manulife monitor
+  - treat the receipt amount as the remaining 10% out-of-pocket portion
+  - prefill phase 1 `WSIB ML` as already claimed/paid at 90%
+  - start workflow at phase 2 `OCT ML` for the remaining balance
+  - attach the receipt PDF when available
+
+## 2026-02-28 - Admin template registry runtime fix (ENOENT)
+Status: COMPLETE
+- Symptom:
+  - Admin UI APIs returned:
+    - `Template registry unavailable: ENOENT: no such file or directory, stat '/app/templates/templates.json'`
+  - Affected pages: Templates and Monitors (template-backed prefill calls).
+- Root cause:
+  - `email-scanning-admin` runtime image did not copy `api/templates/templates.json`.
+  - Resolver fallback in `api/src/templates.ts` checked `/app/templates/templates.json` first in container cwd scenarios.
+- Fixes applied:
+  - Docker image now includes template registry in runner stage:
+    - `email-scanning-admin/Dockerfile`
+    - added `COPY --from=build /app/api/templates ./api/templates`
+  - Resolver hardened to check `/app/api/templates/templates.json` via cwd candidate:
+    - `email-scanning-admin/api/src/templates.ts`
+    - added candidate: `path.resolve(process.cwd(), 'api', 'templates', 'templates.json')`
+- Validation:
+  - `cd email-scanning-admin/api && npm test` => PASS
+  - `cd email-scanning-admin/api && npm run build` => PASS
+- Deployment:
+  - Built/pushed image:
+    - `emailscanacr354705.azurecr.io/email-scanning-admin:template-fix-20260228-0046`
+  - Updated Container App:
+    - `email-scanning-admin-dev--0000011`
+  - Runtime check:
+    - UI serves successfully from new revision.
+    - API unauthenticated template route returns `401` (expected auth gate) instead of template-registry ENOENT.
 
 ## 2026-02-27 - Admin template registry (file-based)
 Status: COMPLETE
@@ -837,7 +959,7 @@ Progress: 2026-02-28T03:18:00Z
     - fallback candidate match by person+amount+provider in recent urgent insurance RVIs
     - auto-create insurance RVI when no match, then attach external reference
     - upload email attachment artifacts (`receipt`) from object storage object keys
-    - append memo line: `Orthodontics: invoice received via email. Plan: WSIB(ML) 50%, then OCT(ML) 50% after COB.`
+    - append memo line: `Orthodontics: invoice received via email. Plan: WSIB(ML) 50%, then OTIP(ML) 50% after COB.`
   - Added non-financial handling:
     - `orthodontics.appointment_scheduled` and `orthodontics.appointment_reminder` are now marked delivered with `reason=non_financial_signal` (no MoneyRecovery API call).
   - Artifact upload failures are non-blocking and returned as `delivery_warnings`.

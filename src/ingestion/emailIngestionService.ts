@@ -796,6 +796,7 @@ export class EmailIngestionService {
     if (payment) {
       const attachmentRefs = extractOrthodonticsAttachmentRefs(params.attachmentMetadata)
       const personCodeHint = normalizePersonCode(params.mailAccountPersonCode) ?? "CHA"
+      const captureKey = "durham_orthodontics_approved_payment"
       const payload = this.buildCommonSignalPayload({
         provider: params.provider,
         mailAccountId: params.mailAccountId,
@@ -806,6 +807,7 @@ export class EmailIngestionService {
           merchant: payment.merchant,
           provider_name: payment.merchant,
           person_code_hint: personCodeHint,
+          capture_key: captureKey,
           amount_total: payment.amount,
           currency: payment.currency,
           transaction_id: payment.transactionId ?? null,
@@ -814,6 +816,7 @@ export class EmailIngestionService {
           attachments: attachmentRefs,
           orthodontics: {
             provider: payment.merchant,
+            capture_key: captureKey,
             amount_total: payment.amount,
             currency: payment.currency,
             transaction_id: payment.transactionId ?? null,
